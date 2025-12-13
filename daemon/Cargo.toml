@@ -1,0 +1,13 @@
+[package]
+name = "daemon"
+version = "0.1.0"
+edition = "2024"
+
+[[bin]]
+name = "watson-daemon"
+path = "src/main.rs"
+
+[dependencies]
+common = { path = "../common" }
+serde_json = "1.0"
+tokio = "1.48.0"

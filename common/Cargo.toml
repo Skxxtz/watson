@@ -1,0 +1,9 @@
+[package]
+name = "common"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+futures = "0.3.31"
+serde = {version = "1.0.228", features = ["derive"]}
+tokio = {version = "1.48.0", features = ["net", "rt-multi-thread", "macros", "io-util"]}
