@@ -1,0 +1,14 @@
+<interface>
+  <template class="MainWindow" parent="GtkApplicationWindow">
+    <child>
+      <object class="GtkBox" id="viewport">
+        <property name="orientation">vertical</property>
+        <property name="spacing">20</property>
+        <property name="vexpand">true</property>
+        <property name="hexpand">true</property>
+
+      </object>
+    </child>
+  </template>
+</interface>
+
