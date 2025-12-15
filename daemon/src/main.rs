@@ -97,14 +97,21 @@ trait RequestHandler {
     fn handle(self, daemon: RwLockWriteGuard<NotificationDaemon>) -> Response;
 }
 impl RequestHandler for Request {
-    fn handle(self, daemon: RwLockWriteGuard<NotificationDaemon>) -> Response {
+    fn handle(self, mut daemon: RwLockWriteGuard<NotificationDaemon>) -> Response {
         match self {
             Request::Ping => Response::Pong,
-            Request::GetStatus => Response::Status { running: true },
+            Request::GetStatus => Response::Status {
+                running: true,
+                silent: daemon.settings.silent,
+            },
             Request::Notification(id) => Response::Notification(daemon.get_by_id(id).cloned()),
             Request::PendingNotifications => {
                 let notifs = daemon.pending_notifications();
                 Response::Notifications(notifs)
+            }
+            Request::Silence(value) => {
+                daemon.settings.silent = value;
+                Response::Ok
             }
         }
     }

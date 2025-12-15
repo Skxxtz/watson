@@ -14,8 +14,10 @@ impl SocketData {
 
 #[derive(Deserialize, Serialize, Debug, Clone)]
 pub enum Response {
+    Ok,
+    Error(String),
     Pong,
-    Status { running: bool },
+    Status { running: bool, silent: bool },
     Notification(Option<Notification>),
     Notifications(Vec<Notification>),
 }
@@ -24,6 +26,7 @@ pub enum Response {
 pub enum Request {
     Ping,
     GetStatus,
+    Silence(bool),
     Notification(u32),
     PendingNotifications,
 }

@@ -15,10 +15,15 @@ impl DaemonHandle {
     }
 }
 
+pub struct DaemonSettings {
+    pub silent: bool,
+}
+
 pub struct NotificationDaemon {
     id: u32,
     buffer: HashMap<u32, Notification>,
     sender: broadcast::Sender<u32>,
+    pub settings: DaemonSettings,
 }
 impl NotificationDaemon {
     pub fn new(sender: broadcast::Sender<u32>) -> Self {
@@ -26,6 +31,7 @@ impl NotificationDaemon {
             id: 0,
             buffer: HashMap::new(),
             sender,
+            settings: DaemonSettings { silent: false },
         }
     }
 
