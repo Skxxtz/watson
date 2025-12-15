@@ -1,21 +1,32 @@
-use std::{io::{Read, Write}, os::unix::net::UnixStream};
+use std::{
+    io::{Read, Write},
+    os::unix::net::UnixStream,
+};
 
 use serde::{Deserialize, Serialize};
 
-#[derive(Deserialize, Serialize)]
+use crate::notification::Notification;
+
+pub struct SocketData;
+impl SocketData {
+    pub const SOCKET_ADDR: &'static str = "/tmp/watson.sock";
+}
+
+#[derive(Deserialize, Serialize, Debug, Clone)]
 pub enum Response {
     Pong,
     Status { running: bool },
+    Notification(Option<Notification>),
+    Notifications(Vec<Notification>),
 }
 
-#[derive(Deserialize, Serialize)]
+#[derive(Deserialize, Serialize, Debug, Clone)]
 pub enum Request {
     Ping,
     GetStatus,
+    Notification(u32),
+    PendingNotifications,
 }
-
-
-
 
 pub trait SizedMessage {
     /// Writes a message to the channel with a length prefix.
@@ -44,13 +55,13 @@ pub trait SizedMessage {
     fn read_sized(&mut self) -> Result<Vec<u8>, std::io::Error>;
 }
 impl SizedMessage for UnixStream {
-    fn write_sized<T: AsRef<[u8]>>(&mut self, buf: T) -> Result<(), std::io::Error>{
+    fn write_sized<T: AsRef<[u8]>>(&mut self, buf: T) -> Result<(), std::io::Error> {
         let buf = buf.as_ref();
 
         // Safely convert buf_len from usize to u32
-        let buf_len: u32 = buf.len()
-            .try_into()
-            .map_err(|_| std::io::Error::new(std::io::ErrorKind::InvalidData, "message too large"))?;
+        let buf_len: u32 = buf.len().try_into().map_err(|_| {
+            std::io::Error::new(std::io::ErrorKind::InvalidData, "message too large")
+        })?;
 
         // Write message size to stream
         self.write_all(&buf_len.to_be_bytes())?;
@@ -60,7 +71,7 @@ impl SizedMessage for UnixStream {
 
         Ok(())
     }
-    fn read_sized(&mut self) -> Result<Vec<u8>, std::io::Error>{
+    fn read_sized(&mut self) -> Result<Vec<u8>, std::io::Error> {
         let mut buf_len = [0u8; 4];
 
         // Read message length
@@ -71,6 +82,5 @@ impl SizedMessage for UnixStream {
         self.read_exact(&mut buf)?;
 
         Ok(buf)
-        
     }
 }
