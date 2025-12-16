@@ -140,8 +140,9 @@ impl Clock {
 
         // Draw minute head
         ctx.set_line_width(3.0);
+        let second = now.second() as f64 / 60.0 * 6.0;
         let minute = now.minute();
-        let angle = minute as f64 * (2.0 * std::f64::consts::PI / 60.0);
+        let angle = (minute as f64 * 6.0 + second) * (std::f64::consts::PI / 180.0);
         let x1 = center + head_margin * angle.sin();
         let y1 = center - head_margin * angle.cos();
 
