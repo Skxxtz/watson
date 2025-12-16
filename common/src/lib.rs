@@ -1,3 +1,4 @@
+pub mod calendar;
 pub mod notification;
 pub mod protocol;
 pub mod tokio;

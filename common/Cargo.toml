@@ -8,3 +8,8 @@ futures = "0.3.31"
 serde = {version = "1.0.228", features = ["derive"]}
 tokio = {version = "1.48.0", features = ["net", "rt-multi-thread", "macros", "io-util"]}
 zbus = "5.12.0"
+ical = "0.11.0"
+memchr = "2.7.6"
+quick-xml = "0.38.4"
+reqwest = "0.12.26"
+chrono = "0.4.42"
