@@ -1,5 +1,4 @@
 use std::sync::Arc;
-
 use common::protocol::{Request, Response, SocketData};
 use serde_json;
 use tokio::sync::RwLockWriteGuard;
