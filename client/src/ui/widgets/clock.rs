@@ -39,7 +39,6 @@ impl Clock {
         clock_area
     }
     pub fn draw(_area: &DrawingArea, ctx: &Context, width: i32, height: i32) {
-
         let now_full: DateTime<Local> = Local::now();
         let now = now_full.time();
 
@@ -50,13 +49,12 @@ impl Clock {
         let clock = ClockContext {
             center: inner_height / 2.0 + padding,
             head_margin: 12.0,
-            radius: (inner_width.min(inner_height) / 2.0)  as f64,
+            radius: (inner_width.min(inner_height) / 2.0) as f64,
 
             hour: now.hour() as f64,
             minute: now.minute() as f64,
             second: now.second() as f64,
         };
-
 
         ctx.select_font_face(
             "Sans",
@@ -82,7 +80,6 @@ impl Clock {
         CairoShapesExt::circle(ctx, clock.center, clock.center, inner_height / 2.0);
 
         CairoShapesExt::circle(ctx, clock.center, clock.center, 5.0);
-
 
         // Draw hour marks
         let line_length = 10.0;
@@ -145,13 +142,22 @@ impl Clock {
         }
 
         // Draw Hour Hand
-        HandStyle::Modern { color: "#000000".into() }.hour_head(&ctx, &clock);
+        HandStyle::Modern {
+            color: "#000000".into(),
+        }
+        .hour_head(&ctx, &clock);
 
         // Draw Minute Hand
-        HandStyle::Modern { color: "#000000".into() }.minute_hand(&ctx, &clock);
+        HandStyle::Modern {
+            color: "#000000".into(),
+        }
+        .minute_hand(&ctx, &clock);
 
         // Draw Second Hand
-        HandStyle::Modern { color: "#bf4759".into() }.second_head(&ctx, &clock);
+        HandStyle::Modern {
+            color: "#bf4759".into(),
+        }
+        .second_head(&ctx, &clock);
 
         // Draw screws
         ctx.set_source_rgb(0.0, 0.0, 0.0);
@@ -167,12 +173,8 @@ impl Clock {
 }
 
 enum HandStyle {
-    Modern {
-        color: String,
-    },
-    Sharp {
-        color: String
-    },
+    Modern { color: String },
+    Sharp { color: String },
 }
 impl HandStyle {
     fn hour_head(&self, ctx: &Context, clock: &ClockContext) {
@@ -308,7 +310,6 @@ impl HandStyle {
                 ctx.fill().unwrap();
             }
         }
-
     }
 
     fn second_head(&self, ctx: &Context, clock: &ClockContext) {
@@ -337,7 +338,6 @@ impl HandStyle {
             }
             _ => {}
         }
-
     }
 }
 

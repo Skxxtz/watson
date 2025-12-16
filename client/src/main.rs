@@ -14,7 +14,7 @@ use gtk4::{
         ApplicationFlags,
         prelude::{ApplicationExt, ApplicationExtManual},
     },
-    glib::{subclass::types::ObjectSubclassIsExt},
+    glib::subclass::types::ObjectSubclassIsExt,
     prelude::{BoxExt, GtkWindowExt},
 };
 
@@ -43,7 +43,6 @@ async fn main() {
 
         let clock = Clock::new();
         imp.viewport.append(&clock);
-
 
         let events = vec![
             CalendarEvent {
@@ -74,9 +73,6 @@ async fn main() {
         ];
         let (area, _calendar) = Calendar::new(events);
         imp.viewport.append(&area);
-
-        
-
     });
     setup.app.run();
     connect().await;

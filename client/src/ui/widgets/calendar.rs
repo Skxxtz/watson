@@ -2,7 +2,10 @@ use std::{cell::RefCell, rc::Rc};
 
 use chrono::{Local, NaiveTime, Timelike};
 use gtk4::{
-    DrawingArea, cairo::{Context, LinearGradient}, glib::object::ObjectExt, prelude::{DrawingAreaExtManual, WidgetExt}
+    DrawingArea,
+    cairo::{Context, LinearGradient},
+    glib::object::ObjectExt,
+    prelude::{DrawingAreaExtManual, WidgetExt},
 };
 
 use crate::ui::widgets::utils::{CairoShapesExt, Conversions};
@@ -46,7 +49,6 @@ impl Calendar {
                 gtk4::glib::ControlFlow::Continue
             }
         });
-
 
         (calendar_area, Self { events })
     }
