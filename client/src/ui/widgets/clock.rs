@@ -1,4 +1,4 @@
-use std::fs;
+use std::{f64::consts::PI, fs};
 
 use crate::ui::widgets::utils::CairoShapesExt;
 use chrono::{DateTime, Local, Timelike};
@@ -39,11 +39,24 @@ impl Clock {
         clock_area
     }
     pub fn draw(_area: &DrawingArea, ctx: &Context, width: i32, height: i32) {
+
+        let now_full: DateTime<Local> = Local::now();
+        let now = now_full.time();
+
         let padding = (width as f64 * 0.03).max(5.0);
         let inner_height = height as f64 - 2.0 * padding;
         let inner_width = width as f64 - 2.0 * padding;
 
-        let head_margin = 12.0;
+        let clock = ClockContext {
+            center: inner_height / 2.0 + padding,
+            head_margin: 12.0,
+            radius: (inner_width.min(inner_height) / 2.0)  as f64,
+
+            hour: now.hour() as f64,
+            minute: now.minute() as f64,
+            second: now.second() as f64,
+        };
+
 
         ctx.select_font_face(
             "Sans",
@@ -52,9 +65,6 @@ impl Clock {
         );
         ctx.set_font_size(15.0);
         ctx.set_line_cap(gtk4::cairo::LineCap::Round);
-
-        let now_full: DateTime<Local> = Local::now();
-        let now = now_full.time();
 
         // Background
         ctx.set_source_rgba(0.0, 0.0, 0.0, 0.0);
@@ -68,13 +78,11 @@ impl Clock {
         ctx.fill().unwrap();
 
         // Clock Face
-        let center = inner_height / 2.0 + padding;
         ctx.set_source_rgb(1.0, 1.0, 1.0);
-        CairoShapesExt::circle(ctx, center, center, inner_height / 2.0);
+        CairoShapesExt::circle(ctx, clock.center, clock.center, inner_height / 2.0);
 
-        CairoShapesExt::circle(ctx, center, center, 5.0);
+        CairoShapesExt::circle(ctx, clock.center, clock.center, 5.0);
 
-        let radius = (inner_width.min(inner_height) / 2.0) as f64;
 
         // Draw hour marks
         let line_length = 10.0;
@@ -82,12 +90,12 @@ impl Clock {
         for i in 1..=12 {
             ctx.set_source_rgb(0.0, 0.0, 0.0);
             let angle = i as f64 * (2.0 * std::f64::consts::PI / 12.0);
-            let x1 = center + (radius - line_length - line_offset) * angle.sin();
-            let y1 = center - (radius - line_length - line_offset) * angle.cos();
-            let x2 = center + (radius - line_offset) * angle.sin();
-            let y2 = center - (radius - line_offset) * angle.cos();
-            let x3 = center + (radius - line_length * 2.7) * angle.sin();
-            let y3 = center - (radius - line_length * 2.7) * angle.cos();
+            let x1 = clock.center + (clock.radius - line_length - line_offset) * angle.sin();
+            let y1 = clock.center - (clock.radius - line_length - line_offset) * angle.cos();
+            let x2 = clock.center + (clock.radius - line_offset) * angle.sin();
+            let y2 = clock.center - (clock.radius - line_offset) * angle.cos();
+            let x3 = clock.center + (clock.radius - line_length * 2.7) * angle.sin();
+            let y3 = clock.center - (clock.radius - line_length * 2.7) * angle.cos();
 
             ctx.move_to(x1, y1);
             ctx.line_to(x2, y2);
@@ -108,10 +116,10 @@ impl Clock {
             }
 
             let angle = i as f64 * (2.0 * std::f64::consts::PI / 60.0);
-            let x1 = center + (radius - line_length - line_offset) * angle.sin();
-            let y1 = center - (radius - line_length - line_offset) * angle.cos();
-            let x2 = center + (radius - line_offset) * angle.sin();
-            let y2 = center - (radius - line_offset) * angle.cos();
+            let x1 = clock.center + (clock.radius - line_length - line_offset) * angle.sin();
+            let y1 = clock.center - (clock.radius - line_length - line_offset) * angle.cos();
+            let x2 = clock.center + (clock.radius - line_offset) * angle.sin();
+            let y2 = clock.center - (clock.radius - line_offset) * angle.cos();
 
             ctx.move_to(x1, y1);
             ctx.line_to(x2, y2);
@@ -129,88 +137,216 @@ impl Clock {
                 let time_offset = now_full.offset().to_string();
                 ctx.set_source_rgb(0.8, 0.8, 0.8);
 
-                CairoShapesExt::centered_text(ctx, &time_offset, center, center + 35.0);
+                CairoShapesExt::centered_text(ctx, &time_offset, clock.center, clock.center + 35.0);
 
                 ctx.set_font_size(18.0);
-                CairoShapesExt::centered_text(ctx, place, center, center - 35.0);
+                CairoShapesExt::centered_text(ctx, place, clock.center, clock.center - 35.0);
             }
         }
 
-        ctx.set_source_rgb(0.0, 0.0, 0.0);
+        // Draw Hour Hand
+        HandStyle::Modern { color: "#000000".into() }.hour_head(&ctx, &clock);
 
-        // Draw minute head
-        ctx.set_line_width(3.0);
-        let second = now.second() as f64 / 60.0 * 6.0;
-        let minute = now.minute();
-        let angle = (minute as f64 * 6.0 + second) * (std::f64::consts::PI / 180.1);
-        let x1 = center + head_margin * angle.sin();
-        let y1 = center - head_margin * angle.cos();
+        // Draw Minute Hand
+        HandStyle::Modern { color: "#000000".into() }.minute_hand(&ctx, &clock);
 
-        ctx.move_to(center, center);
-        ctx.line_to(x1, y1);
-        ctx.stroke().unwrap();
-
-        ctx.set_line_width(6.0);
-        let line_length = radius * 0.9;
-        let x2 = center + line_length * angle.sin();
-        let y2 = center - line_length * angle.cos();
-
-        ctx.move_to(x1, y1);
-        ctx.line_to(x2, y2);
-        ctx.stroke().unwrap();
-
-        // Draw hour head
-        ctx.set_line_width(3.0);
-        let hour = now.hour() % 12 * 5;
-        let minute = minute as f64 / 60.0 * 5.0;
-        let angle = (hour as f64 + minute) * (std::f64::consts::PI / 30.0);
-        let x1 = center + head_margin * angle.sin();
-        let y1 = center - head_margin * angle.cos();
-
-        ctx.move_to(center, center);
-        ctx.line_to(x1, y1);
-        ctx.stroke().unwrap();
-
-        ctx.set_line_width(6.0);
-        let line_length = radius * 0.5;
-        let x2 = center + line_length * angle.sin();
-        let y2 = center - line_length * angle.cos();
-
-        ctx.move_to(x1, y1);
-        ctx.line_to(x2, y2);
-        ctx.stroke().unwrap();
-
-        // Draw minute head
-        let (r, g, b) = Conversions::hex_to_rgb("#bf4759");
-        ctx.set_source_rgba(r, g, b, 1.0);
-        ctx.set_line_width(2.0);
-        let line_length = radius * 0.8;
-        let minute = now.second();
-        let angle = minute as f64 * (std::f64::consts::PI / 30.0);
-        let x1 = center + line_length * angle.sin();
-        let y1 = center - line_length * angle.cos();
-
-        ctx.move_to(center, center);
-        ctx.line_to(x1, y1);
-        ctx.stroke().unwrap();
-
-        let angle = (minute as f64 - 30.0) * (std::f64::consts::PI / 30.0);
-        let x1 = center + 1.3 * head_margin * angle.sin();
-        let y1 = center - 1.3 * head_margin * angle.cos();
-
-        ctx.move_to(center, center);
-        ctx.line_to(x1, y1);
-        ctx.stroke().unwrap();
+        // Draw Second Hand
+        HandStyle::Modern { color: "#bf4759".into() }.second_head(&ctx, &clock);
 
         // Draw screws
         ctx.set_source_rgb(0.0, 0.0, 0.0);
-        CairoShapesExt::circle(ctx, center, center, 4.5);
+        CairoShapesExt::circle(ctx, clock.center, clock.center, 4.5);
 
         let (r, g, b) = Conversions::hex_to_rgb("#bf4759");
         ctx.set_source_rgba(r, g, b, 1.0);
-        CairoShapesExt::circle(ctx, center, center, 3.0);
+        CairoShapesExt::circle(ctx, clock.center, clock.center, 3.0);
 
         ctx.set_source_rgb(1.0, 1.0, 1.0);
-        CairoShapesExt::circle(ctx, center, center, 1.5);
+        CairoShapesExt::circle(ctx, clock.center, clock.center, 1.5);
     }
+}
+
+enum HandStyle {
+    Modern {
+        color: String,
+    },
+    Sharp {
+        color: String
+    },
+}
+impl HandStyle {
+    fn hour_head(&self, ctx: &Context, clock: &ClockContext) {
+        let angle = ((clock.hour % 12.0 * 5.0) + clock.minute / 12.0) * (PI / 30.0);
+        let line_length = clock.radius * 0.5;
+
+        match self {
+            Self::Modern { color } => {
+                // Draw hour head
+                let (r, g, b) = Conversions::hex_to_rgb(&color);
+                ctx.set_source_rgba(r, g, b, 1.0);
+                ctx.set_line_width(3.0);
+                let x1 = clock.center + clock.head_margin * angle.sin();
+                let y1 = clock.center - clock.head_margin * angle.cos();
+
+                ctx.move_to(clock.center, clock.center);
+                ctx.line_to(x1, y1);
+                ctx.stroke().unwrap();
+
+                ctx.set_line_width(6.0);
+                let x2 = clock.center + line_length * angle.sin();
+                let y2 = clock.center - line_length * angle.cos();
+
+                ctx.move_to(x1, y1);
+                ctx.line_to(x2, y2);
+                ctx.stroke().unwrap();
+            }
+            Self::Sharp { color } => {
+                let (r, g, b) = Conversions::hex_to_rgb(&color);
+                ctx.set_source_rgba(r, g, b, 1.0);
+                ctx.set_line_width(1.0);
+
+                let thickness = 8.0;
+                let half_t = thickness / 2.0;
+                let k = 0.4;
+
+                let dx = angle.sin();
+                let dy = -angle.cos();
+
+                let px = -dy;
+                let py = dx;
+
+                // End point point
+                let cx = clock.center + dx * line_length;
+                let cy = clock.center + dy * line_length;
+
+                // Perpendicular offset vector
+                let ox = px * half_t;
+                let oy = py * half_t;
+
+                // Fractual point on center → end
+                let mx = clock.center + dx * line_length * k;
+                let my = clock.center + dy * line_length * k;
+
+                let bx = mx + ox;
+                let by = my + oy;
+
+                let bx2 = mx - ox;
+                let by2 = my - oy;
+
+                ctx.move_to(clock.center, clock.center);
+                ctx.line_to(bx, by);
+                ctx.line_to(cx, cy);
+                ctx.line_to(bx2, by2);
+                ctx.close_path();
+                ctx.fill().unwrap();
+            }
+        }
+    }
+    fn minute_hand(&self, ctx: &Context, clock: &ClockContext) {
+        let angle = (clock.minute + clock.second / 60.0) * 6.0 * (PI / 180.0);
+        let line_length = clock.radius * 0.9;
+
+        match self {
+            Self::Modern { color } => {
+                // Draw minute head
+                let (r, g, b) = Conversions::hex_to_rgb(&color);
+                ctx.set_source_rgba(r, g, b, 1.0);
+                ctx.set_line_width(3.0);
+                let x1 = clock.center + clock.head_margin * angle.sin();
+                let y1 = clock.center - clock.head_margin * angle.cos();
+
+                ctx.move_to(clock.center, clock.center);
+                ctx.line_to(x1, y1);
+                ctx.stroke().unwrap();
+
+                ctx.set_line_width(6.0);
+                let x2 = clock.center + line_length * angle.sin();
+                let y2 = clock.center - line_length * angle.cos();
+
+                ctx.move_to(x1, y1);
+                ctx.line_to(x2, y2);
+                ctx.stroke().unwrap();
+            }
+            Self::Sharp { color } => {
+                let (r, g, b) = Conversions::hex_to_rgb(&color);
+                ctx.set_source_rgba(r, g, b, 1.0);
+                ctx.set_line_width(1.0);
+
+                let thickness = 9.0;
+                let half_t = thickness / 2.0;
+                let k = 0.3;
+
+                let dx = angle.sin();
+                let dy = -angle.cos();
+
+                let px = -dy;
+                let py = dx;
+
+                // End point point
+                let cx = clock.center + dx * line_length;
+                let cy = clock.center + dy * line_length;
+
+                // Perpendicular offset vector
+                let ox = px * half_t;
+                let oy = py * half_t;
+
+                // Fractual point on center → end
+                let mx = clock.center + dx * line_length * k;
+                let my = clock.center + dy * line_length * k;
+
+                let bx = mx + ox;
+                let by = my + oy;
+
+                let bx2 = mx - ox;
+                let by2 = my - oy;
+
+                ctx.move_to(clock.center, clock.center);
+                ctx.line_to(bx, by);
+                ctx.line_to(cx, cy);
+                ctx.line_to(bx2, by2);
+                ctx.close_path();
+                ctx.fill().unwrap();
+            }
+        }
+
+    }
+
+    fn second_head(&self, ctx: &Context, clock: &ClockContext) {
+        match self {
+            Self::Modern { color } => {
+                // Draw second head
+                let (r, g, b) = Conversions::hex_to_rgb(&color);
+                ctx.set_source_rgba(r, g, b, 1.0);
+                ctx.set_line_width(2.0);
+                let line_length = clock.radius * 0.8;
+                let angle = clock.second as f64 * (PI / 30.0);
+                let x1 = clock.center + line_length * angle.sin();
+                let y1 = clock.center - line_length * angle.cos();
+
+                ctx.move_to(clock.center, clock.center);
+                ctx.line_to(x1, y1);
+                ctx.stroke().unwrap();
+
+                let angle = (clock.second as f64 - 30.0) * (PI / 30.0);
+                let x1 = clock.center + 1.3 * clock.head_margin * angle.sin();
+                let y1 = clock.center - 1.3 * clock.head_margin * angle.cos();
+
+                ctx.move_to(clock.center, clock.center);
+                ctx.line_to(x1, y1);
+                ctx.stroke().unwrap();
+            }
+            _ => {}
+        }
+
+    }
+}
+
+struct ClockContext {
+    center: f64,
+    head_margin: f64,
+    radius: f64,
+
+    hour: f64,
+    minute: f64,
+    second: f64,
 }
