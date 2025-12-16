@@ -142,7 +142,7 @@ impl Clock {
         ctx.set_line_width(3.0);
         let second = now.second() as f64 / 60.0 * 6.0;
         let minute = now.minute();
-        let angle = (minute as f64 * 6.0 + second) * (std::f64::consts::PI / 180.0);
+        let angle = (minute as f64 * 6.0 + second) * (std::f64::consts::PI / 180.1);
         let x1 = center + head_margin * angle.sin();
         let y1 = center - head_margin * angle.cos();
 
@@ -163,7 +163,7 @@ impl Clock {
         ctx.set_line_width(3.0);
         let hour = now.hour() % 12 * 5;
         let minute = minute as f64 / 60.0 * 5.0;
-        let angle = (hour as f64 + minute) * (2.0 * std::f64::consts::PI / 60.0);
+        let angle = (hour as f64 + minute) * (std::f64::consts::PI / 30.0);
         let x1 = center + head_margin * angle.sin();
         let y1 = center - head_margin * angle.cos();
 
@@ -186,7 +186,7 @@ impl Clock {
         ctx.set_line_width(2.0);
         let line_length = radius * 0.8;
         let minute = now.second();
-        let angle = minute as f64 * (2.0 * std::f64::consts::PI / 60.0);
+        let angle = minute as f64 * (std::f64::consts::PI / 30.0);
         let x1 = center + line_length * angle.sin();
         let y1 = center - line_length * angle.cos();
 
@@ -194,7 +194,7 @@ impl Clock {
         ctx.line_to(x1, y1);
         ctx.stroke().unwrap();
 
-        let angle = (minute as f64 - 30.0) * (2.0 * std::f64::consts::PI / 60.0);
+        let angle = (minute as f64 - 30.0) * (std::f64::consts::PI / 30.0);
         let x1 = center + 1.3 * head_margin * angle.sin();
         let y1 = center - 1.3 * head_margin * angle.cos();
 
