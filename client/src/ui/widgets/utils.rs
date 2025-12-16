@@ -48,15 +48,22 @@ impl CairoShapesExt {
 
 pub struct Conversions;
 impl Conversions {
-    pub fn hex_to_rgb(hex: &str) -> (f64, f64, f64) {
+    pub fn hex_to_rgb(hex: &str) -> (f64, f64, f64, f64) {
         let hex = hex.trim_start_matches('#');
-        if hex.len() != 6 {
-            return (0.0, 0.0, 0.0);
+        let len = hex.len();
+        if len != 6 && len != 8 {
+            return (0.0, 0.0, 0.0, 1.0);
         }
 
         let r = u8::from_str_radix(&hex[0..2], 16).unwrap() as f64 / 255.0;
         let g = u8::from_str_radix(&hex[2..4], 16).unwrap() as f64 / 255.0;
         let b = u8::from_str_radix(&hex[4..6], 16).unwrap() as f64 / 255.0;
-        (r, g, b)
+        let a = if len == 8 {
+            u8::from_str_radix(&hex[6..8], 16).unwrap() as f64 / 255.0
+        } else {
+            1.0
+        };
+
+        (r, g, b, a)
     }
 }

@@ -1,6 +1,6 @@
-use std::sync::Arc;
 use common::protocol::{Request, Response, SocketData};
 use serde_json;
+use std::sync::Arc;
 use tokio::sync::RwLockWriteGuard;
 use tokio::{
     net::{UnixListener, UnixStream},
@@ -41,7 +41,7 @@ async fn dbus_listener(daemon: Arc<RwLock<NotificationDaemon>>) -> zbus::Result<
         .await?;
 
     println!("Notification daemon running");
-    futures_util::future::pending::<()>().await;
+    std::future::pending::<()>().await;
 
     Ok(())
 }

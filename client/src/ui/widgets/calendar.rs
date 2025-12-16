@@ -9,6 +9,7 @@ use gtk4::{
 };
 
 use crate::ui::widgets::utils::{CairoShapesExt, Conversions};
+use common::calendar::{icloud::CalDavEvent, utils::structs::DateTimeSpec};
 
 pub struct CalendarEvent {
     pub start: NaiveTime,
@@ -17,10 +18,10 @@ pub struct CalendarEvent {
 }
 
 pub struct Calendar {
-    events: Rc<RefCell<Vec<CalendarEvent>>>,
+    events: Rc<RefCell<Vec<CalDavEvent>>>,
 }
 impl Calendar {
-    pub fn new(events: Vec<CalendarEvent>) -> (DrawingArea, Self) {
+    pub fn new(events: Rc<RefCell<Vec<CalDavEvent>>>) -> (DrawingArea, Self) {
         let calendar_area = DrawingArea::builder()
             .vexpand(false)
             .hexpand(false)
@@ -28,8 +29,6 @@ impl Calendar {
             .css_classes(["widget", "calendar"])
             .build();
         calendar_area.set_size_request(400, 400);
-
-        let events = Rc::new(RefCell::new(events));
 
         // Draw function
         calendar_area.set_draw_func({
@@ -57,7 +56,7 @@ impl Calendar {
         ctx: &Context,
         width: i32,
         height: i32,
-        events: &[CalendarEvent],
+        events: &[CalDavEvent],
     ) {
         // Create timeline
         let hours_to_show = 8;
@@ -124,7 +123,7 @@ impl Calendar {
             ctx.show_text(&time_label).unwrap();
         }
 
-        // Draw mock events
+        // Draw events
         ctx.set_operator(gtk4::cairo::Operator::Over);
         ctx.select_font_face(
             "Sans",
@@ -132,12 +131,35 @@ impl Calendar {
             gtk4::cairo::FontWeight::Normal,
         );
         for event in events {
-            if event.end <= window_start || event.start >= window_end {
+            let Some(ref event_start) = event.start else {
+                continue;
+            };
+            let Some(ref event_end) = event.end else {
+                continue;
+            };
+
+            let start = match event_start {
+                DateTimeSpec::DateTime { .. } => {
+                    event_start.utc_time().with_timezone(&Local).time()
+                }
+                _ => continue,
+            };
+            let end = match event_end {
+                DateTimeSpec::DateTime { .. } => event_end.utc_time().with_timezone(&Local).time(),
+                _ => continue,
+            };
+            println!("{:?}", event.summary);
+            println!("{:?}", event.calendar_info.name);
+            println!("{:?}", start);
+            println!("{:?}", event);
+            println!("{:?}\n\n\n", end);
+
+            if end <= window_start || start >= window_end {
                 continue;
             }
 
-            let visible_start = event.start.max(window_start);
-            let visible_end = event.end.min(window_end);
+            let visible_start = start.max(window_start);
+            let visible_end = end.min(window_end);
 
             let start_secs = (visible_start - window_start).num_seconds() as f64;
             let end_secs = (visible_end - window_start).num_seconds() as f64;
@@ -150,7 +172,8 @@ impl Calendar {
             // Colors:
             // Blue: #4D99E6
             // Orange: #e8a849
-            let (r, g, b) = Conversions::hex_to_rgb("#e8a849");
+            let color = event.calendar_info.color.as_deref().unwrap_or("#e9a949");
+            let (r, g, b, _a) = Conversions::hex_to_rgb(&color);
             ctx.set_source_rgba(r, g, b, 0.9);
             CairoShapesExt::rounded_rectangle(
                 ctx,
@@ -165,14 +188,15 @@ impl Calendar {
             // Event label
             ctx.set_source_rgb(1.0, 1.0, 1.0);
             ctx.move_to(padding + 45.0, start_y + 15.0);
-            ctx.show_text(event.label).unwrap();
+            let summary = event.summary.as_deref().unwrap_or("Untitled Event");
+            ctx.show_text(summary).unwrap();
         }
 
         // Draw current time line
         let now = Local::now().time();
         let current_y = (now - window_start).num_seconds() as f64 / total_seconds * inner_height;
-        let (r, g, b) = Conversions::hex_to_rgb("#bf4759");
-        ctx.set_source_rgba(r, g, b, 1.0); // Red line
+        let (r, g, b, a) = Conversions::hex_to_rgb("#bf4759");
+        ctx.set_source_rgba(r, g, b, a); // Red line
         ctx.set_line_width(2.0);
         ctx.move_to(padding, current_y + padding);
         ctx.line_to(inner_width + padding, current_y + padding);

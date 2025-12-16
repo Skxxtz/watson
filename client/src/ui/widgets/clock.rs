@@ -70,9 +70,9 @@ impl Clock {
         ctx.paint().unwrap();
 
         // Clock Frame
-        let (r, g, b) = Conversions::hex_to_rgb("##2E3035");
+        let (r, g, b, a) = Conversions::hex_to_rgb("#2E3035");
         CairoShapesExt::rounded_rectangle(&ctx, 0.0, 0.0, width as f64, height as f64, 20.0);
-        ctx.set_source_rgba(r, g, b, 1.0);
+        ctx.set_source_rgba(r, g, b, a);
         ctx.fill().unwrap();
 
         // Clock Face
@@ -163,8 +163,8 @@ impl Clock {
         ctx.set_source_rgb(0.0, 0.0, 0.0);
         CairoShapesExt::circle(ctx, clock.center, clock.center, 4.5);
 
-        let (r, g, b) = Conversions::hex_to_rgb("#bf4759");
-        ctx.set_source_rgba(r, g, b, 1.0);
+        let (r, g, b, a) = Conversions::hex_to_rgb("#bf4759");
+        ctx.set_source_rgba(r, g, b, a);
         CairoShapesExt::circle(ctx, clock.center, clock.center, 3.0);
 
         ctx.set_source_rgb(1.0, 1.0, 1.0);
@@ -184,8 +184,8 @@ impl HandStyle {
         match self {
             Self::Modern { color } => {
                 // Draw hour head
-                let (r, g, b) = Conversions::hex_to_rgb(&color);
-                ctx.set_source_rgba(r, g, b, 1.0);
+                let (r, g, b, a) = Conversions::hex_to_rgb(&color);
+                ctx.set_source_rgba(r, g, b, a);
                 ctx.set_line_width(3.0);
                 let x1 = clock.center + clock.head_margin * angle.sin();
                 let y1 = clock.center - clock.head_margin * angle.cos();
@@ -203,8 +203,8 @@ impl HandStyle {
                 ctx.stroke().unwrap();
             }
             Self::Sharp { color } => {
-                let (r, g, b) = Conversions::hex_to_rgb(&color);
-                ctx.set_source_rgba(r, g, b, 1.0);
+                let (r, g, b, a) = Conversions::hex_to_rgb(&color);
+                ctx.set_source_rgba(r, g, b, a);
                 ctx.set_line_width(1.0);
 
                 let thickness = 8.0;
@@ -251,8 +251,8 @@ impl HandStyle {
         match self {
             Self::Modern { color } => {
                 // Draw minute head
-                let (r, g, b) = Conversions::hex_to_rgb(&color);
-                ctx.set_source_rgba(r, g, b, 1.0);
+                let (r, g, b, a) = Conversions::hex_to_rgb(&color);
+                ctx.set_source_rgba(r, g, b, a);
                 ctx.set_line_width(3.0);
                 let x1 = clock.center + clock.head_margin * angle.sin();
                 let y1 = clock.center - clock.head_margin * angle.cos();
@@ -270,8 +270,8 @@ impl HandStyle {
                 ctx.stroke().unwrap();
             }
             Self::Sharp { color } => {
-                let (r, g, b) = Conversions::hex_to_rgb(&color);
-                ctx.set_source_rgba(r, g, b, 1.0);
+                let (r, g, b, a) = Conversions::hex_to_rgb(&color);
+                ctx.set_source_rgba(r, g, b, a);
                 ctx.set_line_width(1.0);
 
                 let thickness = 9.0;
@@ -316,8 +316,8 @@ impl HandStyle {
         match self {
             Self::Modern { color } => {
                 // Draw second head
-                let (r, g, b) = Conversions::hex_to_rgb(&color);
-                ctx.set_source_rgba(r, g, b, 1.0);
+                let (r, g, b, a) = Conversions::hex_to_rgb(&color);
+                ctx.set_source_rgba(r, g, b, a);
                 ctx.set_line_width(2.0);
                 let line_length = clock.radius * 0.8;
                 let angle = clock.second as f64 * (PI / 30.0);

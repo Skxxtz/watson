@@ -1,11 +1,14 @@
+use std::{cell::RefCell, rc::Rc};
+
 use crate::{
     connection::ClientConnection,
     ui::{
         WatsonUi,
-        widgets::{Calendar, Clock, calendar::CalendarEvent},
+        widgets::{Calendar, Clock},
     },
 };
-use chrono::NaiveTime;
+use chrono::Local;
+use common::calendar::icloud::PropfindInterface;
 use common::protocol::Request;
 use gtk4::{
     Application, CssProvider,
@@ -14,8 +17,8 @@ use gtk4::{
         ApplicationFlags,
         prelude::{ApplicationExt, ApplicationExtManual},
     },
-    glib::subclass::types::ObjectSubclassIsExt,
-    prelude::{BoxExt, GtkWindowExt},
+    glib::{object::ObjectExt, subclass::types::ObjectSubclassIsExt},
+    prelude::{BoxExt, GtkWindowExt, WidgetExt},
 };
 
 mod connection;
@@ -44,35 +47,36 @@ async fn main() {
         let clock = Clock::new();
         imp.viewport.append(&clock);
 
-        let events = vec![
-            CalendarEvent {
-                start: NaiveTime::from_hms_opt(9, 0, 0).unwrap(),
-                end: NaiveTime::from_hms_opt(10, 0, 0).unwrap(),
-                label: "Meeting",
-            },
-            CalendarEvent {
-                start: NaiveTime::from_hms_opt(13, 30, 0).unwrap(),
-                end: NaiveTime::from_hms_opt(14, 30, 0).unwrap(),
-                label: "Lunch",
-            },
-            CalendarEvent {
-                start: NaiveTime::from_hms_opt(18, 0, 0).unwrap(),
-                end: NaiveTime::from_hms_opt(18, 50, 0).unwrap(),
-                label: "Call",
-            },
-            CalendarEvent {
-                start: NaiveTime::from_hms_opt(19, 0, 0).unwrap(),
-                end: NaiveTime::from_hms_opt(20, 50, 0).unwrap(),
-                label: "Example",
-            },
-            CalendarEvent {
-                start: NaiveTime::from_hms_opt(21, 0, 0).unwrap(),
-                end: NaiveTime::from_hms_opt(22, 0, 0).unwrap(),
-                label: "Another Example",
-            },
-        ];
-        let (area, _calendar) = Calendar::new(events);
+        let events = Rc::new(RefCell::new(Vec::new()));
+
+        let (area, _calendar) = Calendar::new(Rc::clone(&events));
         imp.viewport.append(&area);
+
+        gtk4::glib::MainContext::default().spawn_local({
+            let events = Rc::clone(&events);
+            let cal_weak = area.downgrade();
+            async move {
+                let mut interface = PropfindInterface::new();
+
+                match interface.get_principal().await {
+                    Ok(_) => match interface.get_calendars().await {
+                        Ok(calendar_info) => match interface.get_events(calendar_info).await {
+                            Ok(mut evs) => {
+                                let today = Local::now().to_utc();
+                                evs.retain(|e| e.occurs_on_day(&today));
+                                events.borrow_mut().extend(evs);
+                                if let Some(clock) = cal_weak.upgrade() {
+                                    clock.queue_draw();
+                                }
+                            }
+                            Err(e) => eprintln!("Failed to fetch events: {:?}", e),
+                        },
+                        Err(e) => eprintln!("Failed to fetch calendars: {:?}", e),
+                    },
+                    Err(e) => eprintln!("Failed to get principal: {:?}", e),
+                }
+            }
+        });
     });
     setup.app.run();
     connect().await;
