@@ -5,12 +5,14 @@ window {
 
 .calendar {
     border-radius: 20px;
-    background: #2E3035;
+    background: #181818;
     color: rgb(150, 150, 150);
+    border: 1px solid #333333;
 }
 
 .clock {
     border-radius: 20px;
-    background: #2E3035;
+    background: #181818;
     color: rgb(150, 150, 150);
+    border: 1px solid #333333;
 }

@@ -16,14 +16,26 @@ pub struct WidgetBase {
 pub enum WidgetSpec {
     Clock {
         #[serde(default)]
+        time_zone: Option<String>,
+
+        #[serde(default)]
         head_style: HandStyle,
 
         #[serde(default)]
-        time_zone: Option<String>,
+        accent_color: Option<String>,
+
+        #[serde(default)]
+        font: Option<String>,
     },
     Calendar {
         #[serde(default)]
         selection: Option<CalendarRule>,
+
+        #[serde(default)]
+        accent_color: Option<String>,
+
+        #[serde(default)]
+        font: Option<String>,
     },
     Row {
         #[serde(default)]

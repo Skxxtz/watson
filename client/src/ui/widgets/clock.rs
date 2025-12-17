@@ -42,9 +42,11 @@ impl Clock {
         clock_area
     }
     pub fn draw(_area: &DrawingArea, ctx: &Context, width: i32, height: i32, specs: &WidgetSpec) {
-        let WidgetSpec::Clock { head_style, time_zone } = specs else {
+        let WidgetSpec::Clock { time_zone, head_style, accent_color, font } = specs else {
             return
         };
+        let accent_color = accent_color.as_deref().unwrap_or("#bf4759");
+        let font = font.as_deref().unwrap_or("Sans");
         
         let tz: Tz = match time_zone {
             Some(tz_str) => tz_str.parse::<Tz>().unwrap_or(Tz::UTC),
@@ -81,7 +83,7 @@ impl Clock {
         };
 
         ctx.select_font_face(
-            "Sans",
+            font,
             gtk4::cairo::FontSlant::Normal,
             gtk4::cairo::FontWeight::Bold,
         );
@@ -138,7 +140,7 @@ impl Clock {
 
         // Draw Zimezone
         ctx.select_font_face(
-            "Sans",
+            font,
             gtk4::cairo::FontSlant::Normal,
             gtk4::cairo::FontWeight::Normal,
         );
@@ -160,7 +162,7 @@ impl Clock {
 
         // Draw Second Hand
         HandStyle::Modern {
-            color: "#bf4759".into(),
+            color: accent_color.into()
         }
         .second_head(&ctx, &clock);
 

@@ -76,7 +76,7 @@ impl Calendar {
                             Ok(mut evs) => {
                                 let today = Local::now().to_utc();
 
-                                if let WidgetSpec::Calendar { selection } = specs.as_ref() {
+                                if let WidgetSpec::Calendar { selection, .. } = specs.as_ref() {
                                     evs.retain(|e| {
                                         selection
                                             .as_ref()
@@ -124,6 +124,12 @@ impl Calendar {
         events_timed: &[CalDavEvent],
         spec: &WidgetSpec,
     ) {
+        let WidgetSpec::Calendar { selection:_, accent_color, font } = spec else {
+            return;
+        };
+        let accent_color = accent_color.as_deref().unwrap_or("#bf4759");
+        let font = font.as_deref().unwrap_or("Sans");
+
         // Create timeline
         let hours_to_show = 8;
         let today = Local::now();
@@ -181,26 +187,28 @@ impl Calendar {
             }
         };
 
+
         // Set date string
-        // --- First Line (Big Date) ---
         ctx.set_source_rgb(color_r, color_g, color_b);
         ctx.set_font_size(50.0);
+        ctx.select_font_face(
+            font,
+            gtk4::cairo::FontSlant::Normal,
+            gtk4::cairo::FontWeight::Normal,
+        );
         let today_string = today.format("%b %-d").to_string();
         let extents1 = ctx.text_extents(&today_string).unwrap();
 
-        // Subtract x_bearing here to align ink to padding
         ctx.move_to(context.padding - extents1.x_bearing(), context.padding - extents1.y_bearing());
         ctx.show_text(&today_string).unwrap();
 
-        // --- Second Line (Weekday) ---
         ctx.set_font_size(15.0);
-        let Rgba{r, g, b, a} = Rgba::from_str("#bf4759").unwrap_or_default();
+        let Rgba{r, g, b, a} = Rgba::from_str(accent_color).unwrap_or_default();
         ctx.set_source_rgba(r, g, b, a);
         let weekday_string = today.format("%A").to_string();
         let extents2 = ctx.text_extents(&weekday_string).unwrap();
 
         let y_pos = context.padding - extents1.y_bearing();
-        // Subtract x_bearing here as well
         ctx.move_to(context.padding - extents2.x_bearing(), y_pos - extents2.y_bearing() + 10.0);
         ctx.show_text(&weekday_string).unwrap();
 
@@ -219,7 +227,7 @@ impl Calendar {
             // Draw hour text
             ctx.set_source_rgb(color_r, color_g, color_b);
             ctx.select_font_face(
-                "Sans",
+                font,
                 gtk4::cairo::FontSlant::Normal,
                 gtk4::cairo::FontWeight::Bold,
             );
@@ -232,7 +240,7 @@ impl Calendar {
         // Draw events
         ctx.set_operator(gtk4::cairo::Operator::Over);
         ctx.select_font_face(
-            "Sans",
+            font,
             gtk4::cairo::FontSlant::Normal,
             gtk4::cairo::FontWeight::Bold,
 
@@ -248,7 +256,7 @@ impl Calendar {
         // Draw current time line
         let now = Local::now().naive_local();
         let current_y = (now - window_start).num_seconds() as f64 / context.total_seconds * context.inner_height;
-        let Rgba { r, g, b, a } = Rgba::from_str("#bf4759").unwrap_or_default();
+        let Rgba { r, g, b, a } = Rgba::from_str(accent_color).unwrap_or_default();
         ctx.set_source_rgba(r, g, b, a); // Red line
         ctx.set_line_width(2.0);
         ctx.move_to(context.padding, current_y + context.padding_top);

@@ -62,14 +62,6 @@ pub struct Rgba {
     pub b: f64,
     pub a: f64,
 }
-impl Rgba {
-    pub fn darken(&mut self, alpha: f64) {
-        self.r = self.r * (1.0 - alpha);
-        self.g = self.g * (1.0 - alpha);
-        self.b = self.b * (1.0 - alpha);
-    }
-    
-}
 
 #[derive(Debug, Clone, Copy)]
 pub struct Hsl {
