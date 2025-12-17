@@ -9,7 +9,8 @@ use chrono::{DateTime, Datelike, Duration, Utc, Weekday};
 use ical::{IcalParser, parser::ical::component::IcalEvent};
 use quick_xml::{Reader, events::Event};
 use reqwest::{
-    Client, header::{CONTENT_TYPE, HeaderMap, HeaderValue}
+    Client,
+    header::{CONTENT_TYPE, HeaderMap, HeaderValue},
 };
 
 use crate::{
@@ -391,19 +392,18 @@ impl TryFrom<IcalEvent> for CalDavEvent {
 
         out.event_type = if let Some(start) = out.start.as_ref() {
             match (start, out.end.as_ref()) {
-                (
-                    DateTimeSpec::DateTime { .. },
-                    Some(DateTimeSpec::DateTime { .. }),
-                ) => CalEventType::Timed,
+                (DateTimeSpec::DateTime { .. }, Some(DateTimeSpec::DateTime { .. })) => {
+                    CalEventType::Timed
+                }
                 _ => CalEventType::AllDay,
             }
         } else {
             return Err(WatsonError {
                 r#type: WatsonErrorType::Deserialization,
-                error: "Failed to deserialize ICalEvent into CalDavEvent. (Missing start event)".into(),
-            })
+                error: "Failed to deserialize ICalEvent into CalDavEvent. (Missing start event)"
+                    .into(),
+            });
         };
-
 
         if out.uid.is_empty() {
             Err(WatsonError {
@@ -626,7 +626,7 @@ impl CalDavEvent {
 
                     if map.get("BYMONTHDAY").is_none() {
                         if target.day() != dt_start.day() {
-                            return false
+                            return false;
                         }
                     }
 
