@@ -1,26 +1,22 @@
-use std::{cell::RefCell, rc::Rc};
+use std::env;
 
 use crate::{
+    config::{WidgetSpec, load_config},
     connection::ClientConnection,
     ui::{
         WatsonUi,
         widgets::{Calendar, Clock},
     },
 };
-use chrono::Local;
-use common::calendar::icloud::PropfindInterface;
 use common::protocol::Request;
 use gtk4::{
-    Application, CssProvider,
-    gdk::Display,
-    gio::{
+    Application, Box, CssProvider, gdk::Display, gio::{
         ApplicationFlags,
         prelude::{ApplicationExt, ApplicationExtManual},
-    },
-    glib::{object::ObjectExt, subclass::types::ObjectSubclassIsExt},
-    prelude::{BoxExt, GtkWindowExt, WidgetExt},
+    }, glib::subclass::types::ObjectSubclassIsExt, prelude::{BoxExt, GtkWindowExt}
 };
 
+mod config;
 mod connection;
 mod ui;
 
@@ -28,6 +24,10 @@ mod ui;
 async fn main() {
     let setup = setup();
     setup.app.connect_activate(|app| {
+        // Load Config
+        let config = load_config().unwrap_or_default();
+        println!("{:?}", config);
+
         // Load css
         let provider = CssProvider::new();
         let display = Display::default().unwrap();
@@ -38,48 +38,47 @@ async fn main() {
             gtk4::STYLE_PROVIDER_PRIORITY_APPLICATION,
         );
 
+
         let mut ui = WatsonUi::default();
         let win = ui.window(app);
-
-        win.present();
         let imp = win.imp();
+        win.present();
 
-        let clock = Clock::new();
-        imp.viewport.append(&clock);
+        for widget in config {
+            let spec = widget.spec;
+            create_widgets(&imp.viewport.get(), spec);
+        }
 
-        let events = Rc::new(RefCell::new(Vec::new()));
 
-        let (area, _calendar) = Calendar::new(Rc::clone(&events));
-        imp.viewport.append(&area);
 
-        gtk4::glib::MainContext::default().spawn_local({
-            let events = Rc::clone(&events);
-            let cal_weak = area.downgrade();
-            async move {
-                let mut interface = PropfindInterface::new();
 
-                match interface.get_principal().await {
-                    Ok(_) => match interface.get_calendars().await {
-                        Ok(calendar_info) => match interface.get_events(calendar_info).await {
-                            Ok(mut evs) => {
-                                let today = Local::now().to_utc();
-                                evs.retain(|e| e.occurs_on_day(&today));
-                                events.borrow_mut().extend(evs);
-                                if let Some(clock) = cal_weak.upgrade() {
-                                    clock.queue_draw();
-                                }
-                            }
-                            Err(e) => eprintln!("Failed to fetch events: {:?}", e),
-                        },
-                        Err(e) => eprintln!("Failed to fetch calendars: {:?}", e),
-                    },
-                    Err(e) => eprintln!("Failed to get principal: {:?}", e),
-                }
-            }
-        });
     });
     setup.app.run();
     connect().await;
+}
+
+fn create_widgets(viewport: &Box, spec: WidgetSpec) {
+    match spec {
+        WidgetSpec::Calendar { .. } => {
+            let calendar = Calendar::new(&spec);
+            viewport.append(&calendar);
+        },
+        WidgetSpec::Clock { .. } => {
+            let clock = Clock::new(&spec);
+            viewport.append(&clock);
+        },
+        WidgetSpec::Row { spacing, children } => {
+            let row = Box::builder()
+                .orientation(gtk4::Orientation::Horizontal)
+                .spacing(spacing)
+                .build();
+            viewport.append(&row);
+
+            for child in children {
+                create_widgets(&row, child);
+            }
+        },
+    }
 }
 
 struct Setup {
