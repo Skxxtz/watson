@@ -1,6 +1,6 @@
-pub mod calendar;
+mod calendar;
 mod clock;
 mod utils;
 
 pub use calendar::Calendar;
-pub use clock::Clock;
+pub use clock::{Clock, HandStyle};

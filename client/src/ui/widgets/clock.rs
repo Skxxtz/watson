@@ -1,19 +1,18 @@
-use std::{f64::consts::PI, fs};
+use std::{f64::consts::PI, fs, rc::Rc, str::FromStr};
 
-use crate::ui::widgets::utils::CairoShapesExt;
+use crate::{config::WidgetSpec, ui::widgets::utils::{CairoShapesExt, Rgba}};
 use chrono::{DateTime, Local, Timelike};
+use chrono_tz::Tz;
 use gtk4::{
-    DrawingArea,
-    cairo::Context,
-    glib::object::ObjectExt,
-    prelude::{DrawingAreaExtManual, WidgetExt},
+    DrawingArea, cairo::Context, glib::object::ObjectExt, prelude::{DrawingAreaExtManual, WidgetExt}
 };
-
-use super::utils::Conversions;
+use serde::{Deserialize, Serialize};
 
 pub struct Clock;
 impl Clock {
-    pub fn new() -> DrawingArea {
+    pub fn new(specs: &WidgetSpec) -> DrawingArea {
+        let specs = Rc::new(specs.clone());
+
         let clock_area = DrawingArea::builder()
             .vexpand(false)
             .hexpand(false)
@@ -23,8 +22,12 @@ impl Clock {
 
         clock_area.set_size_request(200, 200);
 
-        clock_area.set_draw_func(|area, ctx, width, height| {
-            Clock::draw(area, ctx, width, height);
+
+        clock_area.set_draw_func({
+            let specs = Rc::clone(&specs);
+            move |area, ctx, width, height| {
+                Clock::draw(area, ctx, width, height, &specs);
+            }
         });
 
         // Make update every second
@@ -38,8 +41,29 @@ impl Clock {
 
         clock_area
     }
-    pub fn draw(_area: &DrawingArea, ctx: &Context, width: i32, height: i32) {
-        let now_full: DateTime<Local> = Local::now();
+    pub fn draw(_area: &DrawingArea, ctx: &Context, width: i32, height: i32, specs: &WidgetSpec) {
+        let WidgetSpec::Clock { head_style, time_zone } = specs else {
+            return
+        };
+        
+        let tz: Tz = match time_zone {
+            Some(tz_str) => tz_str.parse::<Tz>().unwrap_or(Tz::UTC),
+            None => {
+                fs::read_link("/etc/localtime")
+                    .ok()
+                    .and_then(|path| {
+                        // Extract "Europe/Berlin" from "/usr/share/zoneinfo/Europe/Berlin"
+                        let path_str = path.to_str()?;
+                        let parts: Vec<&str> = path_str.split("zoneinfo/").collect();
+                        parts.get(1).map(|&name| name.to_string())
+                    })
+                .and_then(|name| name.parse::<Tz>().ok())
+                    // 3. Absolute fallback if symlink is missing or unparseable
+                    .unwrap_or(Tz::UTC)
+            }
+        };
+
+        let now_full: DateTime<Tz> = Local::now().with_timezone(&tz);
         let now = now_full.time();
 
         let padding = (width as f64 * 0.03).max(5.0);
@@ -70,7 +94,7 @@ impl Clock {
         ctx.paint().unwrap();
 
         // Clock Frame
-        let (r, g, b, a) = Conversions::hex_to_rgb("#2E3035");
+        let Rgba { r, g, b, a } = Rgba::from_str("#2E3035").unwrap_or_default();
         CairoShapesExt::rounded_rectangle(&ctx, 0.0, 0.0, width as f64, height as f64, 20.0);
         ctx.set_source_rgba(r, g, b, a);
         ctx.fill().unwrap();
@@ -129,29 +153,21 @@ impl Clock {
             gtk4::cairo::FontSlant::Normal,
             gtk4::cairo::FontWeight::Normal,
         );
-        if let Ok(tz) = fs::read_link("/etc/localtime") {
-            if let Some(place) = tz.to_str().and_then(|s| s.split('/').last()) {
-                let time_offset = now_full.offset().to_string();
-                ctx.set_source_rgb(0.8, 0.8, 0.8);
+        if let Some(tz_str) = tz.name().split('/').last().map(|s| s.replace('_', " ")) {
+            let time_offset = now_full.offset().to_string();
+            ctx.set_source_rgb(0.8, 0.8, 0.8);
 
-                CairoShapesExt::centered_text(ctx, &time_offset, clock.center, clock.center + 35.0);
+            CairoShapesExt::centered_text(ctx, &time_offset, clock.center, clock.center + 35.0);
 
-                ctx.set_font_size(18.0);
-                CairoShapesExt::centered_text(ctx, place, clock.center, clock.center - 35.0);
-            }
+            ctx.set_font_size(18.0);
+            CairoShapesExt::centered_text(ctx, &tz_str, clock.center, clock.center - 35.0);
         }
 
         // Draw Hour Hand
-        HandStyle::Modern {
-            color: "#000000".into(),
-        }
-        .hour_head(&ctx, &clock);
+        head_style.hour_head(ctx, &clock);
 
         // Draw Minute Hand
-        HandStyle::Modern {
-            color: "#000000".into(),
-        }
-        .minute_hand(&ctx, &clock);
+        head_style.minute_hand(ctx, &clock);
 
         // Draw Second Hand
         HandStyle::Modern {
@@ -163,7 +179,7 @@ impl Clock {
         ctx.set_source_rgb(0.0, 0.0, 0.0);
         CairoShapesExt::circle(ctx, clock.center, clock.center, 4.5);
 
-        let (r, g, b, a) = Conversions::hex_to_rgb("#bf4759");
+        let Rgba { r, g, b, a } = Rgba::from_str("#bf4759").unwrap_or_default();
         ctx.set_source_rgba(r, g, b, a);
         CairoShapesExt::circle(ctx, clock.center, clock.center, 3.0);
 
@@ -172,9 +188,18 @@ impl Clock {
     }
 }
 
-enum HandStyle {
+#[derive(Debug, Clone, Deserialize, Serialize)]
+#[serde(rename_all = "lowercase")]
+pub enum HandStyle {
     Modern { color: String },
     Sharp { color: String },
+}
+impl Default for HandStyle {
+    fn default() -> Self {
+        Self::Modern {
+            color: "#000000".into(),
+        }
+    }
 }
 impl HandStyle {
     fn hour_head(&self, ctx: &Context, clock: &ClockContext) {
@@ -184,7 +209,7 @@ impl HandStyle {
         match self {
             Self::Modern { color } => {
                 // Draw hour head
-                let (r, g, b, a) = Conversions::hex_to_rgb(&color);
+                let Rgba { r, g, b, a } = Rgba::from_str(&color).unwrap_or_default();
                 ctx.set_source_rgba(r, g, b, a);
                 ctx.set_line_width(3.0);
                 let x1 = clock.center + clock.head_margin * angle.sin();
@@ -203,7 +228,7 @@ impl HandStyle {
                 ctx.stroke().unwrap();
             }
             Self::Sharp { color } => {
-                let (r, g, b, a) = Conversions::hex_to_rgb(&color);
+                let Rgba { r, g, b, a } = Rgba::from_str(&color).unwrap_or_default();
                 ctx.set_source_rgba(r, g, b, a);
                 ctx.set_line_width(1.0);
 
@@ -251,7 +276,7 @@ impl HandStyle {
         match self {
             Self::Modern { color } => {
                 // Draw minute head
-                let (r, g, b, a) = Conversions::hex_to_rgb(&color);
+                let Rgba { r, g, b, a } = Rgba::from_str(&color).unwrap_or_default();
                 ctx.set_source_rgba(r, g, b, a);
                 ctx.set_line_width(3.0);
                 let x1 = clock.center + clock.head_margin * angle.sin();
@@ -270,7 +295,7 @@ impl HandStyle {
                 ctx.stroke().unwrap();
             }
             Self::Sharp { color } => {
-                let (r, g, b, a) = Conversions::hex_to_rgb(&color);
+                let Rgba {r, g, b, a} = Rgba::from_str(&color).unwrap_or_default();
                 ctx.set_source_rgba(r, g, b, a);
                 ctx.set_line_width(1.0);
 
@@ -316,7 +341,7 @@ impl HandStyle {
         match self {
             Self::Modern { color } => {
                 // Draw second head
-                let (r, g, b, a) = Conversions::hex_to_rgb(&color);
+                let Rgba { r,g,b,a } = Rgba::from_str(&color).unwrap_or_default();
                 ctx.set_source_rgba(r, g, b, a);
                 ctx.set_line_width(2.0);
                 let line_length = clock.radius * 0.8;
