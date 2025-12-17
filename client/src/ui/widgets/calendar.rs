@@ -3,7 +3,7 @@ use std::{cell::RefCell, rc::Rc, str::FromStr};
 
 use chrono::{Local, NaiveDate, NaiveDateTime, NaiveTime, Timelike};
 use gtk4::{
-    DrawingArea, cairo::Context, glib::object::ObjectExt, prelude::{DrawingAreaExtManual, WidgetExt}
+    DrawingArea, GestureClick, cairo::Context, glib::object::ObjectExt, prelude::{DrawingAreaExtManual, GestureSingleExt, WidgetExt}
 };
 
 use crate::ui::widgets::utils::{CairoShapesExt, Rgba};
@@ -50,6 +50,9 @@ impl Calendar {
                 Calendar::draw(area, ctx, width, height, &events_allday.borrow(), &events_timed.borrow(), &specs);
             }
         });
+
+        Self::connect_clicked(&calendar_area);
+
 
         // Minute interval redraw
         gtk4::glib::timeout_add_seconds_local(60, {
@@ -115,6 +118,19 @@ impl Calendar {
 
         calendar_area
     }
+    fn connect_clicked(area: &DrawingArea){
+        // Create a GestureClick controller
+        let click = GestureClick::new();
+        click.set_button(0); 
+
+        // Connect to the clicked signal
+        click.connect_pressed(move |_gesture, n_press, x, y| {
+            println!("Clicked {} times at ({}, {})", n_press, x, y);
+        });
+
+        area.add_controller(click);
+
+    }
     pub fn draw(
         area: &DrawingArea,
         ctx: &Context,
@@ -127,8 +143,6 @@ impl Calendar {
         let WidgetSpec::Calendar { selection:_, accent_color, font } = spec else {
             return;
         };
-        let accent_color = accent_color.as_deref().unwrap_or("#bf4759");
-        let font = font.as_deref().unwrap_or("Sans");
 
         // Create timeline
         let hours_to_show = 8;

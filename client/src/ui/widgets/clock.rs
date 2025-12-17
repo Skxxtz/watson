@@ -45,8 +45,6 @@ impl Clock {
         let WidgetSpec::Clock { time_zone, head_style, accent_color, font } = specs else {
             return
         };
-        let accent_color = accent_color.as_deref().unwrap_or("#bf4759");
-        let font = font.as_deref().unwrap_or("Sans");
         
         let tz: Tz = match time_zone {
             Some(tz_str) => tz_str.parse::<Tz>().unwrap_or(Tz::UTC),

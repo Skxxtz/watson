@@ -21,21 +21,21 @@ pub enum WidgetSpec {
         #[serde(default)]
         head_style: HandStyle,
 
-        #[serde(default)]
-        accent_color: Option<String>,
+        #[serde(default = "default_accent")]
+        accent_color: String,
 
-        #[serde(default)]
-        font: Option<String>,
+        #[serde(default = "default_font")]
+        font: String,
     },
     Calendar {
         #[serde(default)]
         selection: Option<CalendarRule>,
 
-        #[serde(default)]
-        accent_color: Option<String>,
+        #[serde(default = "default_accent")]
+        accent_color: String,
 
-        #[serde(default)]
-        font: Option<String>,
+        #[serde(default = "default_font")]
+        font: String,
     },
     Row {
         #[serde(default)]
@@ -86,4 +86,12 @@ pub fn load_config() -> Result<Vec<WidgetInstance>, WatsonError> {
         r#type: WatsonErrorType::Deserialization,
         error: e.to_string(),
     })
+}
+
+
+fn default_font() -> String {
+    "Arial".into()
+}
+fn default_accent() -> String {
+    "#bf4759".into()
 }
