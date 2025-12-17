@@ -5,15 +5,19 @@ use crate::{
     connection::ClientConnection,
     ui::{
         WatsonUi,
-        widgets::{Calendar, Clock},
+        widgets::{Battery, Calendar, Clock},
     },
 };
 use common::protocol::Request;
 use gtk4::{
-    Application, Box, CssProvider, gdk::Display, gio::{
+    Application, Box, CssProvider,
+    gdk::Display,
+    gio::{
         ApplicationFlags,
         prelude::{ApplicationExt, ApplicationExtManual},
-    }, glib::subclass::types::ObjectSubclassIsExt, prelude::{BoxExt, GtkWindowExt}
+    },
+    glib::subclass::types::ObjectSubclassIsExt,
+    prelude::{BoxExt, GtkWindowExt, WidgetExt},
 };
 
 mod config;
@@ -38,20 +42,14 @@ async fn main() {
             gtk4::STYLE_PROVIDER_PRIORITY_APPLICATION,
         );
 
-
         let mut ui = WatsonUi::default();
         let win = ui.window(app);
         let imp = win.imp();
         win.present();
 
-        for widget in config {
-            let spec = widget.spec;
+        for spec in config {
             create_widgets(&imp.viewport.get(), spec);
         }
-
-
-
-
     });
     setup.app.run();
     connect().await;
@@ -59,25 +57,61 @@ async fn main() {
 
 fn create_widgets(viewport: &Box, spec: WidgetSpec) {
     match spec {
+        WidgetSpec::Battery { .. } => {
+            let bat = Battery::new(&spec);
+            viewport.append(&bat);
+        }
         WidgetSpec::Calendar { .. } => {
             let calendar = Calendar::new(&spec);
             viewport.append(&calendar);
-        },
+        }
         WidgetSpec::Clock { .. } => {
             let clock = Clock::new(&spec);
             viewport.append(&clock);
-        },
-        WidgetSpec::Row { spacing, children } => {
-            let row = Box::builder()
-                .orientation(gtk4::Orientation::Horizontal)
+        }
+        WidgetSpec::Column {
+            base,
+            spacing,
+            children,
+        } => {
+            let col = Box::builder()
+                .orientation(gtk4::Orientation::Vertical)
+                .valign(gtk4::Align::Start)
+                .halign(gtk4::Align::Start)
                 .spacing(spacing)
                 .build();
+
+            if let Some(id) = base.id {
+                col.set_widget_name(&id);
+            }
+
+            viewport.append(&col);
+
+            for child in children {
+                create_widgets(&col, child);
+            }
+        }
+        WidgetSpec::Row {
+            base,
+            spacing,
+            children,
+        } => {
+            let row = Box::builder()
+                .orientation(gtk4::Orientation::Horizontal)
+                .valign(gtk4::Align::Start)
+                .halign(gtk4::Align::Start)
+                .spacing(spacing)
+                .build();
+            if let Some(id) = base.id {
+                row.set_widget_name(&id);
+            }
+
             viewport.append(&row);
 
             for child in children {
                 create_widgets(&row, child);
             }
-        },
+        }
     }
 }
 

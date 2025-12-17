@@ -6,15 +6,44 @@ use serde::{Deserialize, Serialize};
 
 use crate::ui::widgets::HandStyle;
 
-#[derive(Debug, Deserialize, Serialize)]
+#[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct WidgetBase {
-    pub priority: u32,
+    #[serde(default)]
+    pub id: Option<String>,
+    #[serde(default)]
+    pub class: Option<String>,
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
 #[serde(tag = "type", rename_all = "lowercase")]
 pub enum WidgetSpec {
+    Battery {
+        // Inherit Base Properties
+        #[serde(flatten)]
+        base: WidgetBase,
+
+        #[serde(default = "default_battery_gradient")]
+        colors: [String; 3],
+        #[serde(default = "default_battery_threshold")]
+        threshold: u8,
+    },
+    Calendar {
+        #[serde(flatten)]
+        base: WidgetBase,
+
+        #[serde(default)]
+        selection: Option<CalendarRule>,
+
+        #[serde(default = "default_accent")]
+        accent_color: String,
+
+        #[serde(default = "default_font")]
+        font: String,
+    },
     Clock {
+        #[serde(flatten)]
+        base: WidgetBase,
+
         #[serde(default)]
         time_zone: Option<String>,
 
@@ -27,29 +56,39 @@ pub enum WidgetSpec {
         #[serde(default = "default_font")]
         font: String,
     },
-    Calendar {
-        #[serde(default)]
-        selection: Option<CalendarRule>,
-
-        #[serde(default = "default_accent")]
-        accent_color: String,
-
-        #[serde(default = "default_font")]
-        font: String,
-    },
     Row {
+        #[serde(flatten)]
+        base: WidgetBase,
+
+        #[serde(default)]
+        spacing: i32,
+        children: Vec<WidgetSpec>,
+    },
+    Column {
+        #[serde(flatten)]
+        base: WidgetBase,
+
         #[serde(default)]
         spacing: i32,
         children: Vec<WidgetSpec>,
     },
 }
-
-#[derive(Debug, Deserialize, Serialize)]
-pub struct WidgetInstance {
-    #[serde(flatten)]
-    pub base: WidgetBase,
-    #[serde(flatten)]
-    pub spec: WidgetSpec,
+impl WidgetSpec {
+    pub fn base(&self) -> Option<&WidgetBase> {
+        match self {
+            Self::Battery { base, .. } => Some(base),
+            Self::Calendar { base, .. } => Some(base),
+            Self::Clock { base, .. } => Some(base),
+            Self::Column { base, .. } => Some(base),
+            Self::Row { base, .. } => Some(base),
+        }
+    }
+    pub fn id(&self) -> Option<&String> {
+        self.base().and_then(|b| b.id.as_ref())
+    }
+    pub fn class(&self) -> Option<&String> {
+        self.base().and_then(|b| b.class.as_ref())
+    }
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
@@ -71,7 +110,7 @@ impl CalendarRule {
     }
 }
 
-pub fn load_config() -> Result<Vec<WidgetInstance>, WatsonError> {
+pub fn load_config() -> Result<Vec<WidgetSpec>, WatsonError> {
     let home = std::env::var("HOME").unwrap();
     let loc = PathBuf::from(home).join(".config/watson/fallback.json");
 
@@ -82,16 +121,25 @@ pub fn load_config() -> Result<Vec<WidgetInstance>, WatsonError> {
 
     let reader = BufReader::new(file);
 
-    serde_json::from_reader::<_, Vec<WidgetInstance>>(reader).map_err(|e| WatsonError {
+    serde_json::from_reader::<_, Vec<WidgetSpec>>(reader).map_err(|e| WatsonError {
         r#type: WatsonErrorType::Deserialization,
         error: e.to_string(),
     })
 }
-
 
 fn default_font() -> String {
     "Arial".into()
 }
 fn default_accent() -> String {
     "#bf4759".into()
+}
+fn default_battery_gradient() -> [String; 3] {
+    [
+        "#68A357".to_string(),
+        "#F9C22E".to_string(),
+        "#E84855".to_string(),
+    ]
+}
+fn default_battery_threshold() -> u8 {
+    40
 }
