@@ -2,3 +2,9 @@ window {
     background: transparent;
     padding: 20px;
 }
+
+.calendar {
+    border-radius: 20px;
+    background: #2E3035;
+    color: rgb(150, 150, 150);
+}
