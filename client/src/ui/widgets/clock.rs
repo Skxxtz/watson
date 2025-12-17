@@ -88,17 +88,6 @@ impl Clock {
         ctx.set_font_size(15.0);
         ctx.set_line_cap(gtk4::cairo::LineCap::Round);
 
-        // Background
-        ctx.set_source_rgba(0.0, 0.0, 0.0, 0.0);
-        ctx.set_operator(gtk4::cairo::Operator::Source);
-        ctx.paint().unwrap();
-
-        // Clock Frame
-        let Rgba { r, g, b, a } = Rgba::from_str("#2E3035").unwrap_or_default();
-        CairoShapesExt::rounded_rectangle(&ctx, 0.0, 0.0, width as f64, height as f64, 20.0);
-        ctx.set_source_rgba(r, g, b, a);
-        ctx.fill().unwrap();
-
         // Clock Face
         ctx.set_source_rgb(1.0, 1.0, 1.0);
         CairoShapesExt::circle(ctx, clock.center, clock.center, inner_height / 2.0);
