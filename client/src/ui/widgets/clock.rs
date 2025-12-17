@@ -1,10 +1,16 @@
 use std::{f64::consts::PI, fs, rc::Rc, str::FromStr};
 
-use crate::{config::WidgetSpec, ui::widgets::utils::{CairoShapesExt, Rgba}};
+use crate::{
+    config::WidgetSpec,
+    ui::widgets::utils::{CairoShapesExt, Rgba},
+};
 use chrono::{DateTime, Local, Timelike};
 use chrono_tz::Tz;
 use gtk4::{
-    DrawingArea, cairo::Context, glib::object::ObjectExt, prelude::{DrawingAreaExtManual, WidgetExt}
+    DrawingArea,
+    cairo::Context,
+    glib::object::ObjectExt,
+    prelude::{DrawingAreaExtManual, WidgetExt},
 };
 use serde::{Deserialize, Serialize};
 
@@ -18,10 +24,17 @@ impl Clock {
             .hexpand(false)
             .css_classes(["widget", "clock"])
             .halign(gtk4::Align::Start)
+            .valign(gtk4::Align::Start)
             .build();
 
-        clock_area.set_size_request(200, 200);
+        if let Some(id) = specs.id() {
+            clock_area.set_widget_name(id);
+        }
+        if let Some(class) = specs.class() {
+            clock_area.add_css_class(class);
+        }
 
+        clock_area.set_size_request(200, 200);
 
         clock_area.set_draw_func({
             let specs = Rc::clone(&specs);
@@ -42,10 +55,17 @@ impl Clock {
         clock_area
     }
     pub fn draw(_area: &DrawingArea, ctx: &Context, width: i32, height: i32, specs: &WidgetSpec) {
-        let WidgetSpec::Clock { time_zone, head_style, accent_color, font } = specs else {
-            return
+        let WidgetSpec::Clock {
+            base: _,
+            time_zone,
+            head_style,
+            accent_color,
+            font,
+        } = specs
+        else {
+            return;
         };
-        
+
         let tz: Tz = match time_zone {
             Some(tz_str) => tz_str.parse::<Tz>().unwrap_or(Tz::UTC),
             None => {
@@ -57,7 +77,7 @@ impl Clock {
                         let parts: Vec<&str> = path_str.split("zoneinfo/").collect();
                         parts.get(1).map(|&name| name.to_string())
                     })
-                .and_then(|name| name.parse::<Tz>().ok())
+                    .and_then(|name| name.parse::<Tz>().ok())
                     // 3. Absolute fallback if symlink is missing or unparseable
                     .unwrap_or(Tz::UTC)
             }
@@ -160,7 +180,7 @@ impl Clock {
 
         // Draw Second Hand
         HandStyle::Modern {
-            color: accent_color.into()
+            color: accent_color.into(),
         }
         .second_head(&ctx, &clock);
 
@@ -284,7 +304,7 @@ impl HandStyle {
                 ctx.stroke().unwrap();
             }
             Self::Sharp { color } => {
-                let Rgba {r, g, b, a} = Rgba::from_str(&color).unwrap_or_default();
+                let Rgba { r, g, b, a } = Rgba::from_str(&color).unwrap_or_default();
                 ctx.set_source_rgba(r, g, b, a);
                 ctx.set_line_width(1.0);
 
@@ -330,7 +350,7 @@ impl HandStyle {
         match self {
             Self::Modern { color } => {
                 // Draw second head
-                let Rgba { r,g,b,a } = Rgba::from_str(&color).unwrap_or_default();
+                let Rgba { r, g, b, a } = Rgba::from_str(&color).unwrap_or_default();
                 ctx.set_source_rgba(r, g, b, a);
                 ctx.set_line_width(2.0);
                 let line_length = clock.radius * 0.8;
