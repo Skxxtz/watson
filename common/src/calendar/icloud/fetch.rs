@@ -9,16 +9,18 @@ use chrono::{DateTime, Datelike, Duration, Utc, Weekday};
 use ical::{IcalParser, parser::ical::component::IcalEvent};
 use quick_xml::{Reader, events::Event};
 use reqwest::{
-    Client,
-    header::{CONTENT_TYPE, HeaderMap, HeaderValue},
+    Client, header::{CONTENT_TYPE, HeaderMap, HeaderValue}
 };
 
-use crate::calendar::{
-    icloud::protocol::PropfindRequest,
-    utils::{
-        funcs::{last_day_of_month, parse_exdate, parse_rdate, parse_until, parse_utc},
-        structs::{Attendee, DateTimeSpec, RecurrenceRule},
+use crate::{
+    calendar::{
+        icloud::protocol::PropfindRequest,
+        utils::{
+            funcs::{last_day_of_month, parse_exdate, parse_rdate, parse_until, parse_utc},
+            structs::{Attendee, DateTimeSpec, RecurrenceRule},
+        },
     },
+    errors::{WatsonError, WatsonErrorType},
 };
 
 // Go to icloud.com
@@ -29,18 +31,6 @@ use crate::calendar::{
 // Click "App-Specific Passwords"
 // Create a new password (name it watson or so)
 //
-
-#[derive(Debug)]
-pub struct WatsonError {
-    pub r#type: WatsonErrorType,
-    pub error: String,
-}
-#[derive(Debug)]
-pub enum WatsonErrorType {
-    HttpGetRequest,
-    Deserialization,
-    UndefinedAttribute,
-}
 
 pub struct PropfindInterface {
     client: Client,
@@ -128,8 +118,6 @@ impl PropfindInterface {
                                             .map(|s| s.to_string())
                                     })
                                     .flatten();
-
-                                println!("{:?}", self.principal);
                             }
                         }
                     }
@@ -351,6 +339,8 @@ pub struct CalDavEvent {
     pub calendar_info: Rc<IcloudCalendarInfo>,
 
     pub rule_expired: bool,
+
+    pub event_type: CalEventType,
 }
 impl TryFrom<IcalEvent> for CalDavEvent {
     type Error = WatsonError;
@@ -398,6 +388,23 @@ impl TryFrom<IcalEvent> for CalDavEvent {
                 _ => {}
             }
         }
+
+        out.event_type = if let Some(start) = out.start.as_ref() {
+            match (start, out.end.as_ref()) {
+                (
+                    DateTimeSpec::DateTime { .. },
+                    Some(DateTimeSpec::DateTime { .. }),
+                ) => CalEventType::Timed,
+                _ => CalEventType::AllDay,
+            }
+        } else {
+            return Err(WatsonError {
+                r#type: WatsonErrorType::Deserialization,
+                error: "Failed to deserialize ICalEvent into CalDavEvent. (Missing start event)".into(),
+            })
+        };
+
+
         if out.uid.is_empty() {
             Err(WatsonError {
                 r#type: WatsonErrorType::Deserialization,
@@ -406,6 +413,17 @@ impl TryFrom<IcalEvent> for CalDavEvent {
         } else {
             Ok(out)
         }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub enum CalEventType {
+    Timed,
+    AllDay,
+}
+impl Default for CalEventType {
+    fn default() -> Self {
+        CalEventType::AllDay
     }
 }
 
@@ -605,11 +623,19 @@ impl CalDavEvent {
                 "MONTHLY" => {
                     let months_since = (target.year() - dt_start.year()) * 12
                         + (target.month() - dt_start.month()) as i32;
+
+                    if map.get("BYMONTHDAY").is_none() {
+                        if target.day() != dt_start.day() {
+                            return false
+                        }
+                    }
+
                     return months_since as i64 % interval == 0;
                 }
                 "YEARLY" => {
                     let months_since = (target.year() - dt_start.year()) * 12
                         + (target.month() - dt_start.month()) as i32;
+
                     return months_since as i64 % (interval * 12) == 0;
                 }
                 _ => return false,
