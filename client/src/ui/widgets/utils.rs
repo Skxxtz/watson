@@ -1,5 +1,5 @@
-use gtk4::cairo::Context;
-use std::str::FromStr;
+use gtk4::{cairo::Context, gdk::FrameClock};
+use std::{cell::Cell, str::FromStr};
 
 pub struct CairoShapesExt;
 impl CairoShapesExt {
@@ -38,6 +38,13 @@ impl CairoShapesExt {
         ctx.close_path();
         ctx.fill().unwrap();
     }
+    pub fn circle_path(ctx: &Context, x: f64, y: f64, radius: f64, frac: f64) {
+        let end_angle = -std::f64::consts::PI / 2.0;
+        let start_angle = end_angle - frac * 2.0 * std::f64::consts::PI;
+
+        ctx.new_path();
+        ctx.arc(x, y, radius, start_angle, end_angle);
+    }
     pub fn centered_text(ctx: &Context, text: &str, cx: f64, cy: f64) {
         let ext = ctx.text_extents(text).unwrap();
         let font_ext = ctx.font_extents().unwrap();
@@ -51,9 +58,7 @@ impl CairoShapesExt {
         ctx.move_to(x, y);
         ctx.show_text(text).unwrap();
     }
-
 }
-
 
 #[derive(Default, Debug, Clone, Copy)]
 pub struct Rgba {
@@ -61,6 +66,17 @@ pub struct Rgba {
     pub g: f64,
     pub b: f64,
     pub a: f64,
+}
+impl Rgba {
+    pub fn lerp(&self, other: &Rgba, t: f64) -> Self {
+        let clamp = |x: f64| x.max(0.0).min(1.0);
+        Rgba {
+            r: clamp(self.r + (other.r - self.r) * t),
+            g: clamp(self.g + (other.g - self.g) * t),
+            b: clamp(self.b + (other.b - self.b) * t),
+            a: clamp(self.a + (other.a - self.a) * t),
+        }
+    }
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -77,7 +93,9 @@ impl FromStr for Rgba {
     fn from_str(hex: &str) -> Result<Self, Self::Err> {
         let hex = hex.trim_start_matches('#');
         let len = hex.len();
-        if len != 6 && len != 8 { return Err(()); }
+        if len != 6 && len != 8 {
+            return Err(());
+        }
 
         let r = u8::from_str_radix(&hex[0..2], 16).map_err(|_| ())? as f64 / 255.0;
         let g = u8::from_str_radix(&hex[2..4], 16).map_err(|_| ())? as f64 / 255.0;
@@ -100,39 +118,177 @@ impl From<Rgba> for Hsl {
         let delta = max - min;
         let l = (max + min) / 2.0;
 
-        let s = if delta == 0.0 { 0.0 } else { delta / (1.0 - (2.0 * l - 1.0).abs()) };
+        let s = if delta == 0.0 {
+            0.0
+        } else {
+            delta / (1.0 - (2.0 * l - 1.0).abs())
+        };
 
-        let mut h = if delta == 0.0 { 0.0 } 
-            else if max == rgba.r { 60.0 * (((rgba.g - rgba.b) / delta) % 6.0) }
-            else if max == rgba.g { 60.0 * (((rgba.b - rgba.r) / delta) + 2.0) }
-            else { 60.0 * (((rgba.r - rgba.g) / delta) + 4.0) };
+        let mut h = if delta == 0.0 {
+            0.0
+        } else if max == rgba.r {
+            60.0 * (((rgba.g - rgba.b) / delta) % 6.0)
+        } else if max == rgba.g {
+            60.0 * (((rgba.b - rgba.r) / delta) + 2.0)
+        } else {
+            60.0 * (((rgba.r - rgba.g) / delta) + 4.0)
+        };
 
-        if h < 0.0 { h += 360.0; }
+        if h < 0.0 {
+            h += 360.0;
+        }
         Self { h, s, l }
     }
 }
 
 impl From<Hsl> for Rgba {
     fn from(hsl: Hsl) -> Self {
-        let q = if hsl.l < 0.5 { hsl.l * (1.0 + hsl.s) } else { hsl.l + hsl.s - hsl.l * hsl.s };
+        let q = if hsl.l < 0.5 {
+            hsl.l * (1.0 + hsl.s)
+        } else {
+            hsl.l + hsl.s - hsl.l * hsl.s
+        };
         let p = 2.0 * hsl.l - q;
         let h_norm = hsl.h / 360.0;
 
         let res = (
-            hue_to_rgb(p, q, h_norm + 1.0/3.0),
+            hue_to_rgb(p, q, h_norm + 1.0 / 3.0),
             hue_to_rgb(p, q, h_norm),
-            hue_to_rgb(p, q, h_norm - 1.0/3.0)
+            hue_to_rgb(p, q, h_norm - 1.0 / 3.0),
         );
-        Self { r: res.0, g: res.1, b: res.2, a: 1.0 }
+        Self {
+            r: res.0,
+            g: res.1,
+            b: res.2,
+            a: 1.0,
+        }
     }
 }
 
 fn hue_to_rgb(p: f64, q: f64, t: f64) -> f64 {
     let mut t = t;
-    if t < 0.0 { t += 1.0 } else if t > 1.0 { t -= 1.0 };
-    if t < 1.0/6.0 { p + (q - p) * 6.0 * t }
-    else if t < 1.0/2.0 { q }
-    else if t < 2.0/3.0 { p + (q - p) * (2.0/3.0 - t) * 6.0 }
-    else { p }
+    if t < 0.0 {
+        t += 1.0
+    } else if t > 1.0 {
+        t -= 1.0
+    };
+    if t < 1.0 / 6.0 {
+        p + (q - p) * 6.0 * t
+    } else if t < 1.0 / 2.0 {
+        q
+    } else if t < 2.0 / 3.0 {
+        p + (q - p) * (2.0 / 3.0 - t) * 6.0
+    } else {
+        p
+    }
 }
 
+// Animation Stuff
+
+#[allow(dead_code)]
+#[derive(Clone, Copy)]
+pub enum EaseFunction {
+    EaseIn,
+    EaseOut,
+    EaseInOut,
+    EaseOutCubic,
+    None,
+}
+impl EaseFunction {
+    pub fn apply(&self, time: f64) -> f64 {
+        let t = time.clamp(0.0, 1.0);
+        match self {
+            Self::EaseIn => t * t,
+            Self::EaseOut => 1.0 - (1.0 - t) * (1.0 - t),
+            Self::EaseInOut => {
+                if t < 0.5 {
+                    2.0 * t * t
+                } else {
+                    1.0 - 2.0 * (1.0 - t) * (1.0 - t)
+                }
+            }
+            Self::EaseOutCubic => 1.0 - (1.0 - t).powi(3),
+            Self::None => t,
+        }
+    }
+}
+
+#[allow(dead_code)]
+#[derive(Clone, Copy)]
+pub enum AnimationDirection {
+    Forward {
+        duration: f64,
+        function: EaseFunction,
+    },
+    Backward {
+        duration: f64,
+        function: EaseFunction,
+    },
+    Uninitialized,
+}
+
+pub struct AnimationState {
+    pub progress: Cell<f64>,
+    pub running: Cell<bool>,
+    last_time: Cell<Option<i64>>,
+    direction: Cell<AnimationDirection>,
+}
+
+impl AnimationState {
+    pub fn new() -> Self {
+        Self {
+            last_time: Cell::new(None),
+            running: Cell::new(false),
+            progress: Cell::new(0.0),
+            direction: Cell::new(AnimationDirection::Uninitialized),
+        }
+    }
+    pub fn start(&self, direction: AnimationDirection) {
+        self.running.set(true);
+        self.last_time.set(None);
+        self.direction.set(direction);
+    }
+
+    pub fn update(&self, frame_clock: &FrameClock) {
+        if !self.running.get() {
+            return;
+        }
+
+        let now = frame_clock.frame_time(); // microseconds
+
+        let elapsed = if let Some(start_ns) = self.last_time.get() {
+            (now - start_ns) as f64 / 1_000_000.0 // seconds
+        } else {
+            self.last_time.set(Some(now));
+            return;
+        };
+
+        let eased_progress = match self.direction.get() {
+            AnimationDirection::Forward { duration, function } => {
+                let linear = (elapsed / duration).min(1.0);
+                function.apply(linear)
+            }
+            AnimationDirection::Backward { duration, function } => {
+                let linear = (1.0 - elapsed / duration).max(0.0);
+                function.apply(linear)
+            }
+            AnimationDirection::Uninitialized => {
+                self.reset();
+                return;
+            }
+        };
+
+        self.progress.set(eased_progress);
+
+        // Stop animation if done
+        if eased_progress >= 1.0 || eased_progress <= 0.0 {
+            self.running.set(false);
+        }
+    }
+    fn reset(&self) {
+        self.progress.set(0.0);
+        self.running.set(false);
+        self.last_time.set(None);
+        self.direction.set(AnimationDirection::Uninitialized);
+    }
+}

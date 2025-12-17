@@ -1,17 +1,22 @@
-use crate::config::WidgetSpec;
+use crate::{
+    config::WidgetSpec,
+    ui::widgets::utils::{AnimationDirection, AnimationState, EaseFunction},
+};
 use std::{cell::RefCell, rc::Rc, str::FromStr};
 
 use chrono::{Local, NaiveDate, NaiveDateTime, NaiveTime, Timelike};
 use gtk4::{
-    DrawingArea, GestureClick, cairo::Context, glib::object::ObjectExt, prelude::{DrawingAreaExtManual, GestureSingleExt, WidgetExt}
+    DrawingArea, GestureClick,
+    cairo::Context,
+    glib::object::ObjectExt,
+    prelude::{DrawingAreaExtManual, GestureSingleExt, WidgetExt, WidgetExtManual},
 };
 
 use crate::ui::widgets::utils::{CairoShapesExt, Rgba};
 use common::calendar::{
-    icloud::{CalDavEvent, CalEventType, PropfindInterface}, utils::structs::DateTimeSpec,
+    icloud::{CalDavEvent, CalEventType, PropfindInterface},
+    utils::structs::DateTimeSpec,
 };
-
-
 
 struct CalendarContext {
     padding: f64,
@@ -31,6 +36,8 @@ pub struct Calendar;
 impl Calendar {
     pub fn new(specs: &WidgetSpec) -> DrawingArea {
         let specs = Rc::new(specs.clone());
+        let state = Rc::new(AnimationState::new());
+
         let events_timed = Rc::new(RefCell::new(Vec::new()));
         let events_allday = Rc::new(RefCell::new(Vec::new()));
         let calendar_area = DrawingArea::builder()
@@ -38,21 +45,38 @@ impl Calendar {
             .hexpand(false)
             .valign(gtk4::Align::Start)
             .css_classes(["widget", "calendar"])
+            .width_request(400)
+            .height_request(400)
             .build();
-        calendar_area.set_size_request(400, 400);
+
+        if let Some(id) = specs.id() {
+            calendar_area.set_widget_name(id);
+        }
+        if let Some(class) = specs.class() {
+            calendar_area.add_css_class(class);
+        }
 
         // Draw function
         calendar_area.set_draw_func({
             let events_timed = Rc::clone(&events_timed);
             let events_allday = Rc::clone(&events_allday);
             let specs = Rc::clone(&specs);
+            let state = Rc::clone(&state);
             move |area, ctx, width, height| {
-                Calendar::draw(area, ctx, width, height, &events_allday.borrow(), &events_timed.borrow(), &specs);
+                Calendar::draw(
+                    area,
+                    ctx,
+                    width,
+                    height,
+                    &events_allday.borrow(),
+                    &events_timed.borrow(),
+                    &specs,
+                    Rc::clone(&state),
+                );
             }
         });
 
         Self::connect_clicked(&calendar_area);
-
 
         // Minute interval redraw
         gtk4::glib::timeout_add_seconds_local(60, {
@@ -65,11 +89,23 @@ impl Calendar {
             }
         });
 
+        calendar_area.add_tick_callback({
+            let state = Rc::clone(&state);
+            move |widget, frame_clock| {
+                if !state.running.get() {
+                    return gtk4::glib::ControlFlow::Continue;
+                }
+                state.update(frame_clock);
+                widget.queue_draw();
+                gtk4::glib::ControlFlow::Continue
+            }
+        });
+
         // Get the calendar events async
         gtk4::glib::MainContext::default().spawn_local({
             let events_timed = Rc::clone(&events_timed);
             let events_allday = Rc::clone(&events_allday);
-            let cal_weak = calendar_area.downgrade();
+            let state = Rc::clone(&state);
             async move {
                 let mut interface = PropfindInterface::new();
 
@@ -90,7 +126,6 @@ impl Calendar {
                                     evs.retain(|e| e.occurs_on_day(&today));
                                 }
 
-
                                 let mut timed = Vec::new();
                                 let mut allday = Vec::new();
                                 for item in evs {
@@ -102,10 +137,11 @@ impl Calendar {
                                 events_timed.borrow_mut().extend(timed);
                                 events_allday.borrow_mut().extend(allday);
 
-
-                                if let Some(cal) = cal_weak.upgrade() {
-                                    cal.queue_draw();
-                                }
+                                // Internally ques draw
+                                state.start(AnimationDirection::Forward {
+                                    duration: 0.7,
+                                    function: EaseFunction::EaseOutCubic,
+                                });
                             }
                             Err(e) => eprintln!("Failed to fetch events: {:?}", e),
                         },
@@ -118,10 +154,10 @@ impl Calendar {
 
         calendar_area
     }
-    fn connect_clicked(area: &DrawingArea){
+    fn connect_clicked(area: &DrawingArea) {
         // Create a GestureClick controller
         let click = GestureClick::new();
-        click.set_button(0); 
+        click.set_button(0);
 
         // Connect to the clicked signal
         click.connect_pressed(move |_gesture, n_press, x, y| {
@@ -129,7 +165,6 @@ impl Calendar {
         });
 
         area.add_controller(click);
-
     }
     pub fn draw(
         area: &DrawingArea,
@@ -139,8 +174,15 @@ impl Calendar {
         events_allday: &[CalDavEvent],
         events_timed: &[CalDavEvent],
         spec: &WidgetSpec,
+        state: Rc<AnimationState>,
     ) {
-        let WidgetSpec::Calendar { selection:_, accent_color, font } = spec else {
+        let WidgetSpec::Calendar {
+            base: _,
+            selection: _,
+            accent_color,
+            font,
+        } = spec
+        else {
             return;
         };
 
@@ -151,7 +193,11 @@ impl Calendar {
         let now = today.time();
 
         let color = area.color();
-        let (color_r, color_g, color_b) = (color.red() as f64, color.green() as f64, color.blue() as f64);
+        let (color_r, color_g, color_b) = (
+            color.red() as f64,
+            color.green() as f64,
+            color.blue() as f64,
+        );
 
         // Tentative start/end centered on now
         let now_hour = now.hour();
@@ -182,17 +228,17 @@ impl Calendar {
 
         // Initialize the area and frame
         let context = {
-            let padding = (width as f64 * 0.05).min(20.0); 
+            let padding = (width as f64 * 0.05).min(20.0);
             let padding_top = if events_allday.len() > 0 {
                 120.0
             } else {
                 100.0
             };
             CalendarContext {
-                padding, 
+                padding,
                 padding_top,
                 inner_width: width as f64 - 2.0 * padding,
-                inner_height: height as f64 -  padding - padding_top,
+                inner_height: height as f64 - padding - padding_top,
                 line_offset: 40.0,
                 todate,
                 window_start,
@@ -200,7 +246,6 @@ impl Calendar {
                 total_seconds: (window_end - window_start).num_seconds() as f64,
             }
         };
-
 
         // Set date string
         ctx.set_source_rgb(color_r, color_g, color_b);
@@ -213,17 +258,23 @@ impl Calendar {
         let today_string = today.format("%b %-d").to_string();
         let extents1 = ctx.text_extents(&today_string).unwrap();
 
-        ctx.move_to(context.padding - extents1.x_bearing(), context.padding - extents1.y_bearing());
+        ctx.move_to(
+            context.padding - extents1.x_bearing(),
+            context.padding - extents1.y_bearing(),
+        );
         ctx.show_text(&today_string).unwrap();
 
         ctx.set_font_size(15.0);
-        let Rgba{r, g, b, a} = Rgba::from_str(accent_color).unwrap_or_default();
+        let Rgba { r, g, b, a } = Rgba::from_str(accent_color).unwrap_or_default();
         ctx.set_source_rgba(r, g, b, a);
         let weekday_string = today.format("%A").to_string();
         let extents2 = ctx.text_extents(&weekday_string).unwrap();
 
         let y_pos = context.padding - extents1.y_bearing();
-        ctx.move_to(context.padding - extents2.x_bearing(), y_pos - extents2.y_bearing() + 10.0);
+        ctx.move_to(
+            context.padding - extents2.x_bearing(),
+            y_pos - extents2.y_bearing() + 10.0,
+        );
         ctx.show_text(&weekday_string).unwrap();
 
         // Draw hour lines
@@ -234,8 +285,14 @@ impl Calendar {
 
             let hour = window_start.hour() + offset as u32;
             let y = (offset as f64 / hours_to_show as f64) * context.inner_height;
-            ctx.move_to(context.padding + context.line_offset, y + context.padding_top);
-            ctx.line_to(context.inner_width + context.padding, y + context.padding_top);
+            ctx.move_to(
+                context.padding + context.line_offset,
+                y + context.padding_top,
+            );
+            ctx.line_to(
+                context.inner_width + context.padding,
+                y + context.padding_top,
+            );
             ctx.stroke().unwrap();
 
             // Draw hour text
@@ -257,32 +314,45 @@ impl Calendar {
             font,
             gtk4::cairo::FontSlant::Normal,
             gtk4::cairo::FontWeight::Bold,
-
         );
 
         for event in events_allday {
             draw_allday_event(ctx, event, &context);
         }
         for event in events_timed {
-            draw_event(ctx, event, &context);
+            draw_event(ctx, event, &context, state.progress.get());
         }
 
         // Draw current time line
         let now = Local::now().naive_local();
-        let current_y = (now - window_start).num_seconds() as f64 / context.total_seconds * context.inner_height;
+        let current_y = (now - window_start).num_seconds() as f64 / context.total_seconds
+            * context.inner_height;
         let Rgba { r, g, b, a } = Rgba::from_str(accent_color).unwrap_or_default();
         ctx.set_source_rgba(r, g, b, a); // Red line
         ctx.set_line_width(2.0);
         ctx.move_to(context.padding, current_y + context.padding_top);
-        ctx.line_to(context.inner_width + context.padding, current_y + context.padding_top);
+        ctx.line_to(
+            context.inner_width + context.padding,
+            current_y + context.padding_top,
+        );
         ctx.stroke().unwrap();
 
         let rad = 3.0;
-        CairoShapesExt::circle(ctx, context.padding - rad, current_y + context.padding_top, rad);
+        CairoShapesExt::circle(
+            ctx,
+            context.padding - rad,
+            current_y + context.padding_top,
+            rad,
+        );
     }
 }
 
-fn draw_event(ctx: &Context, event: &CalDavEvent, context: &CalendarContext) -> Option<()> {
+fn draw_event(
+    ctx: &Context,
+    event: &CalDavEvent,
+    context: &CalendarContext,
+    progress: f64,
+) -> Option<()> {
     let event_start = event.start.as_ref()?;
     let event_end = event.end.as_ref()?;
     let start_time = match event_start {
@@ -301,9 +371,8 @@ fn draw_event(ctx: &Context, event: &CalDavEvent, context: &CalendarContext) -> 
 
     // If not in window, skip
     if end <= context.window_start || start >= context.window_end {
-        return None
+        return None;
     }
-
 
     let visible_start = start.max(context.window_start);
     let visible_end = end.min(context.window_end);
@@ -315,12 +384,9 @@ fn draw_event(ctx: &Context, event: &CalDavEvent, context: &CalendarContext) -> 
     let end_y = (end_secs / context.total_seconds) * context.inner_height + context.padding_top;
     let rect_height = (end_y - start_y).max(1.0);
 
-    // Colors:
-    // Blue: #4D99E6
-    // Orange: #e8a849
     let color = event.calendar_info.color.as_deref().unwrap_or("#e9a949");
     let event_color = Rgba::from_str(color).unwrap_or_default();
-    ctx.set_source_rgba(event_color.r, event_color.g, event_color.b, 0.9);
+    ctx.set_source_rgba(event_color.r, event_color.g, event_color.b, 0.9 * progress);
     CairoShapesExt::rounded_rectangle(
         ctx,
         context.padding + context.line_offset + 1.0,
@@ -333,7 +399,7 @@ fn draw_event(ctx: &Context, event: &CalDavEvent, context: &CalendarContext) -> 
 
     // Event label
     ctx.set_font_size(11.0);
-    ctx.set_source_rgba(1.0, 1.0, 1.0, 0.5);
+    ctx.set_source_rgba(1.0, 1.0, 1.0, 0.5 * progress);
     ctx.move_to(context.padding + context.line_offset + 10.0, start_y + 15.0);
     let summary = event.summary.as_deref().unwrap_or("Untitled Event");
     ctx.show_text(summary).unwrap();
@@ -359,22 +425,12 @@ fn draw_allday_event(ctx: &Context, event: &CalDavEvent, context: &CalendarConte
     let x_start = context.padding - extent.x_bearing();
     let y_start = context.padding_top - 15.0 - height;
 
-
-
     let event_color = Rgba::from_str(color).unwrap_or_default();
     ctx.set_source_rgba(event_color.r, event_color.g, event_color.b, 0.9);
-    CairoShapesExt::rounded_rectangle(
-        ctx,
-        x_start,
-        y_start,
-        width,
-        height,
-        5.0,
-    );
+    CairoShapesExt::rounded_rectangle(ctx, x_start, y_start, width, height, 5.0);
     ctx.fill().unwrap();
 
     ctx.set_font_size(11.0);
     ctx.set_source_rgba(0.0, 0.0, 0.0, 0.35);
     CairoShapesExt::centered_text(ctx, &title, x_start + width / 2.0, y_start + height / 2.0);
-
 }
