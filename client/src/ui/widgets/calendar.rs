@@ -22,6 +22,7 @@ struct CalendarContext {
     padding: f64,
     padding_top: f64,
 
+    max_height: f64,
     inner_width: f64,
     inner_height: f64,
     line_offset: f64,
@@ -252,6 +253,7 @@ impl Calendar {
             CalendarContext {
                 padding,
                 padding_top,
+                max_height: height as f64,
                 inner_width: width as f64 - 2.0 * padding,
                 inner_height: height as f64 - padding - padding_top,
                 line_offset: 40.0,
@@ -395,21 +397,44 @@ fn draw_event(
     let start_secs = (visible_start - context.window_start).num_seconds() as f64;
     let end_secs = (visible_end - context.window_start).num_seconds() as f64;
 
-    let start_y = (start_secs / context.total_seconds) * context.inner_height + context.padding_top;
+    let start_y =
+        (start_secs / context.total_seconds) * (context.inner_height) + context.padding_top;
     let end_y = (end_secs / context.total_seconds) * context.inner_height + context.padding_top;
-    let rect_height = (end_y - start_y).max(1.0) - 2.0;
     let top = start_y + 1.0;
 
     let color = event.calendar_info.color.as_deref().unwrap_or("#e9a949");
     let event_color = Rgba::from_str(color).unwrap_or_default();
     ctx.set_source_rgba(event_color.r, event_color.g, event_color.b, 0.9 * progress);
+
+    let rad;
+    let rect_height;
+    // This part checks if an event ends at the border of a window
+    if end > context.window_end {
+        let overflow = (end - context.window_end).num_seconds() as f64;
+        // Calculate how many seconds the padding would be
+        let pad_time = (context.padding / context.inner_height) * context.total_seconds;
+        let frac = (overflow / pad_time).min(1.0);
+
+        // Check if event goes beyond padding
+        if frac < 1.0 {
+            rad = (5.0, 5.0, 5.0, 5.0);
+        } else {
+            rad = (5.0, 5.0, 0.0, 0.0);
+        }
+
+        rect_height = (end_y - start_y).max(1.0) - 2.0 + frac * context.padding;
+    } else {
+        rad = (5.0, 5.0, 5.0, 5.0);
+        rect_height = (end_y - start_y).max(1.0) - 2.0;
+    }
+
     CairoShapesExt::rounded_rectangle(
         ctx,
         context.padding + context.line_offset + 1.0,
         top,
         context.inner_width - context.line_offset,
-        rect_height - 2.0,
-        5.0,
+        rect_height,
+        rad,
     );
     ctx.fill().unwrap();
 
@@ -457,7 +482,7 @@ fn draw_allday_event(ctx: &Context, event: &CalDavEvent, context: &CalendarConte
 
     let event_color = Rgba::from_str(color).unwrap_or_default();
     ctx.set_source_rgba(event_color.r, event_color.g, event_color.b, 0.9);
-    CairoShapesExt::rounded_rectangle(ctx, x_start, y_start, width, height, 5.0);
+    CairoShapesExt::rounded_rectangle(ctx, x_start, y_start, width, height, (5.0, 5.0, 5.0, 5.0));
     ctx.fill().unwrap();
 
     ctx.set_font_size(11.0);

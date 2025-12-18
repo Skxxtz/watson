@@ -3,32 +3,65 @@ use std::{cell::Cell, str::FromStr};
 
 pub struct CairoShapesExt;
 impl CairoShapesExt {
-    pub fn rounded_rectangle(ctx: &Context, x: f64, y: f64, width: f64, height: f64, radius: f64) {
-        let r = radius.min(width / 2.0).min(height / 2.0);
+    pub fn rounded_rectangle(
+        ctx: &Context,
+        x: f64,
+        y: f64,
+        width: f64,
+        height: f64,
+        radius: (f64, f64, f64, f64),
+    ) {
+        let (rad_tl, rad_tr, rad_br, rad_bl) = radius;
+        let tl = rad_tl.min(width / 2.0).min(height / 2.0);
+        let tr = rad_tr.min(width / 2.0).min(height / 2.0);
+        let br = rad_br.min(width / 2.0).min(height / 2.0);
+        let bl = rad_bl.min(width / 2.0).min(height / 2.0);
 
         ctx.new_sub_path();
+
+        // Start at top-left corner
+        ctx.move_to(x + tl, y);
+
+        // Top edge + top-right corner
+        ctx.line_to(x + width - tr, y);
         ctx.arc(
-            x + width - r,
-            y + r,
-            r,
+            x + width - tr,
+            y + tr,
+            tr,
             -90_f64.to_radians(),
             0_f64.to_radians(),
         );
+
+        // Right edge + bottom-right corner
+        ctx.line_to(x + width, y + height - br);
         ctx.arc(
-            x + width - r,
-            y + height - r,
-            r,
+            x + width - br,
+            y + height - br,
+            br,
             0_f64.to_radians(),
             90_f64.to_radians(),
         );
+
+        // Bottom edge + bottom-left corner
+        ctx.line_to(x + bl, y + height);
         ctx.arc(
-            x + r,
-            y + height - r,
-            r,
+            x + bl,
+            y + height - bl,
+            bl,
             90_f64.to_radians(),
             180_f64.to_radians(),
         );
-        ctx.arc(x + r, y + r, r, 180_f64.to_radians(), 270_f64.to_radians());
+
+        // Left edge + top-left corner
+        ctx.line_to(x, y + tl);
+        ctx.arc(
+            x + tl,
+            y + tl,
+            tl,
+            180_f64.to_radians(),
+            270_f64.to_radians(),
+        );
+
         ctx.close_path();
     }
 
