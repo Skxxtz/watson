@@ -38,6 +38,19 @@ impl Calendar {
         let specs = Rc::new(specs.clone());
         let state = Rc::new(AnimationState::new());
 
+        let mut height = 400;
+
+        if let WidgetSpec::Calendar {
+            hours_past,
+            hours_future,
+            ..
+        } = specs.as_ref()
+        {
+            let span = (*hours_past + *hours_future).clamp(1, 24);
+            let tmp = 200 + span as i32 * 50;
+            height = tmp - tmp % 100;
+        };
+
         let events_timed = Rc::new(RefCell::new(Vec::new()));
         let events_allday = Rc::new(RefCell::new(Vec::new()));
         let calendar_area = DrawingArea::builder()
@@ -46,7 +59,7 @@ impl Calendar {
             .valign(gtk4::Align::Start)
             .css_classes(["widget", "calendar"])
             .width_request(400)
-            .height_request(400)
+            .height_request(height)
             .build();
 
         if let Some(id) = specs.id() {
@@ -177,17 +190,19 @@ impl Calendar {
         state: Rc<AnimationState>,
     ) {
         let WidgetSpec::Calendar {
-            base: _,
-            selection: _,
             accent_color,
             font,
+            hours_past,
+            hours_future,
+            ..
         } = spec
         else {
             return;
         };
 
         // Create timeline
-        let hours_to_show = 8;
+        let hours_to_show = (*hours_past + *hours_future).clamp(1, 24) as u32;
+        let hours_past = *hours_past as u32;
         let today = Local::now();
         let todate = today.date_naive();
         let now = today.time();
@@ -213,13 +228,13 @@ impl Calendar {
             let start_hour = 24 - hours_to_show;
             window_start = todate.and_time(NaiveTime::from_hms_opt(start_hour, 0, 0).unwrap());
             window_end = todate.and_time(day_end);
-        } else if now_hour < (hours_to_show / 2) {
+        } else if now_hour < hours_past {
             // Window pinned to the beginning of the day
             window_start = todate.and_time(midnight_start);
             window_end = todate.and_time(NaiveTime::from_hms_opt(hours_to_show, 0, 0).unwrap());
         } else {
             // Normal sliding window centered on now_hour
-            let start_hour = now_hour.saturating_sub(hours_to_show / 2);
+            let start_hour = now_hour.saturating_sub(hours_past);
             let end_hour = (start_hour + hours_to_show).min(23);
 
             window_start = todate.and_time(NaiveTime::from_hms_opt(start_hour, 0, 0).unwrap());
@@ -382,7 +397,8 @@ fn draw_event(
 
     let start_y = (start_secs / context.total_seconds) * context.inner_height + context.padding_top;
     let end_y = (end_secs / context.total_seconds) * context.inner_height + context.padding_top;
-    let rect_height = (end_y - start_y).max(1.0);
+    let rect_height = (end_y - start_y).max(1.0) - 2.0;
+    let top = start_y + 1.0;
 
     let color = event.calendar_info.color.as_deref().unwrap_or("#e9a949");
     let event_color = Rgba::from_str(color).unwrap_or_default();
@@ -390,8 +406,8 @@ fn draw_event(
     CairoShapesExt::rounded_rectangle(
         ctx,
         context.padding + context.line_offset + 1.0,
-        start_y + 1.0,
-        context.inner_width - context.line_offset - 2.0,
+        top,
+        context.inner_width - context.line_offset,
         rect_height - 2.0,
         5.0,
     );
@@ -400,13 +416,27 @@ fn draw_event(
     // Event label
     ctx.set_font_size(11.0);
     ctx.set_source_rgba(1.0, 1.0, 1.0, 0.5 * progress);
-    ctx.move_to(context.padding + context.line_offset + 10.0, start_y + 15.0);
     let summary = event.summary.as_deref().unwrap_or("Untitled Event");
-    ctx.show_text(summary).unwrap();
+    let time = start_time.time().format("%H:%M").to_string();
 
-    ctx.move_to(context.inner_width + context.padding - 45.0, start_y + 15.0);
-    let summary = start_time.time().format("%H:%M").to_string();
-    ctx.show_text(&summary).unwrap();
+    let extents = ctx.text_extents(&summary).unwrap();
+    let text_height = extents.height();
+
+    if (rect_height - text_height).abs() <= 10.0 {
+        let bottom = start_y + rect_height - 1.0;
+        let usable_height = bottom - top;
+        let cy = top + usable_height / 2.0;
+        let cx = context.padding + context.line_offset + 10.0;
+        CairoShapesExt::vert_centered_text(ctx, summary, cx, cy);
+        let cx = context.inner_width + context.padding - 45.0;
+        CairoShapesExt::vert_centered_text(ctx, &time, cx, cy);
+    } else {
+        ctx.move_to(context.padding + context.line_offset + 10.0, start_y + 15.0);
+        ctx.show_text(summary).unwrap();
+
+        ctx.move_to(context.inner_width + context.padding - 45.0, start_y + 15.0);
+        ctx.show_text(&time).unwrap();
+    }
 
     Some(())
 }

@@ -58,6 +58,12 @@ impl CairoShapesExt {
         ctx.move_to(x, y);
         ctx.show_text(text).unwrap();
     }
+    pub fn vert_centered_text(ctx: &Context, text: &str, cx: f64, cy: f64) {
+        let font_ext = ctx.font_extents().unwrap();
+        let y = cy + (font_ext.ascent() - font_ext.descent()) / 2.0;
+        ctx.move_to(cx, y);
+        ctx.show_text(text).unwrap();
+    }
 }
 
 #[derive(Default, Debug, Clone, Copy)]

@@ -39,6 +39,11 @@ pub enum WidgetSpec {
 
         #[serde(default = "default_font")]
         font: String,
+
+        #[serde(default = "default_calendar_hours_past")]
+        hours_past: u8,
+        #[serde(default = "default_calendar_hours_fut")]
+        hours_future: u8,
     },
     Clock {
         #[serde(flatten)]
@@ -132,6 +137,12 @@ fn default_font() -> String {
 }
 fn default_accent() -> String {
     "#bf4759".into()
+}
+fn default_calendar_hours_past() -> u8 {
+    2
+}
+fn default_calendar_hours_fut() -> u8 {
+    8
 }
 fn default_battery_gradient() -> [String; 3] {
     [
