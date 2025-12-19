@@ -7,7 +7,11 @@ pub struct WatsonError {
 pub enum WatsonErrorType {
     HttpGetRequest,
     Deserialization,
+    Serialization,
     UndefinedAttribute,
 
     FileOpen,
+
+    CredentialEntry,
+    CredentialRead,
 }

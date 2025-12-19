@@ -1,6 +1,5 @@
 use std::{
     collections::{HashMap, HashSet},
-    env,
     io::Cursor,
     rc::Rc,
 };
@@ -14,6 +13,7 @@ use reqwest::{
 };
 
 use crate::{
+    auth::Credential,
     calendar::{
         icloud::protocol::PropfindRequest,
         utils::{
@@ -41,9 +41,12 @@ pub struct PropfindInterface {
     principal: Option<String>,
 }
 impl PropfindInterface {
-    pub fn new() -> Self {
-        let username = env::var("ICLOUD_USERNAME").unwrap_or_default();
-        let password = env::var("ICLOUD_APP_SPECIFIC_PASSWORD").unwrap_or_default();
+    pub fn new(credential: Credential) -> Self {
+        let Credential {
+            username,
+            secret: password,
+            ..
+        } = credential;
 
         let client = Client::new();
 

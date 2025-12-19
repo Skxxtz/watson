@@ -13,16 +13,18 @@ use gtk4::{
 };
 
 use crate::ui::widgets::utils::{CairoShapesExt, Rgba};
-use common::calendar::{
-    icloud::{CalDavEvent, CalEventType, PropfindInterface},
-    utils::structs::DateTimeSpec,
+use common::{
+    auth::CredentialManager,
+    calendar::{
+        icloud::{CalDavEvent, CalEventType, PropfindInterface},
+        utils::structs::DateTimeSpec,
+    },
 };
 
 struct CalendarContext {
     padding: f64,
     padding_top: f64,
 
-    max_height: f64,
     inner_width: f64,
     inner_height: f64,
     line_offset: f64,
@@ -121,47 +123,55 @@ impl Calendar {
             let events_allday = Rc::clone(&events_allday);
             let state = Rc::clone(&state);
             async move {
-                let mut interface = PropfindInterface::new();
+                let credentials =
+                    match CredentialManager::new("icloud").and_then(|m| m.get_credentials()) {
+                        Ok(m) => m,
+                        Err(e) => {
+                            eprintln!("{:?}", e);
+                            return;
+                        }
+                    };
+                for account in credentials {
+                    let mut interface = PropfindInterface::new(account);
+                    match interface.get_principal().await {
+                        Ok(_) => match interface.get_calendars().await {
+                            Ok(calendar_info) => match interface.get_events(calendar_info).await {
+                                Ok(mut evs) => {
+                                    let today = Local::now().to_utc();
 
-                match interface.get_principal().await {
-                    Ok(_) => match interface.get_calendars().await {
-                        Ok(calendar_info) => match interface.get_events(calendar_info).await {
-                            Ok(mut evs) => {
-                                let today = Local::now().to_utc();
-
-                                if let WidgetSpec::Calendar { selection, .. } = specs.as_ref() {
-                                    evs.retain(|e| {
-                                        selection
-                                            .as_ref()
-                                            .map_or(true, |s| s.is_allowed(&e.calendar_info.name))
-                                            && e.occurs_on_day(&today)
-                                    });
-                                } else {
-                                    evs.retain(|e| e.occurs_on_day(&today));
-                                }
-
-                                let mut timed = Vec::new();
-                                let mut allday = Vec::new();
-                                for item in evs {
-                                    match item.event_type {
-                                        CalEventType::Timed => timed.push(item),
-                                        CalEventType::AllDay => allday.push(item),
+                                    if let WidgetSpec::Calendar { selection, .. } = specs.as_ref() {
+                                        evs.retain(|e| {
+                                            selection.as_ref().map_or(true, |s| {
+                                                s.is_allowed(&e.calendar_info.name)
+                                            }) && e.occurs_on_day(&today)
+                                        });
+                                    } else {
+                                        evs.retain(|e| e.occurs_on_day(&today));
                                     }
-                                }
-                                events_timed.borrow_mut().extend(timed);
-                                events_allday.borrow_mut().extend(allday);
 
-                                // Internally ques draw
-                                state.start(AnimationDirection::Forward {
-                                    duration: 0.7,
-                                    function: EaseFunction::EaseOutCubic,
-                                });
-                            }
-                            Err(e) => eprintln!("Failed to fetch events: {:?}", e),
+                                    let mut timed = Vec::new();
+                                    let mut allday = Vec::new();
+                                    for item in evs {
+                                        match item.event_type {
+                                            CalEventType::Timed => timed.push(item),
+                                            CalEventType::AllDay => allday.push(item),
+                                        }
+                                    }
+                                    events_timed.borrow_mut().extend(timed);
+                                    events_allday.borrow_mut().extend(allday);
+
+                                    // Internally ques draw
+                                    state.start(AnimationDirection::Forward {
+                                        duration: 0.7,
+                                        function: EaseFunction::EaseOutCubic,
+                                    });
+                                }
+                                Err(e) => eprintln!("Failed to fetch events: {:?}", e),
+                            },
+                            Err(e) => eprintln!("Failed to fetch calendars: {:?}", e),
                         },
-                        Err(e) => eprintln!("Failed to fetch calendars: {:?}", e),
-                    },
-                    Err(e) => eprintln!("Failed to get principal: {:?}", e),
+                        Err(e) => eprintln!("Failed to get principal: {:?}", e),
+                    }
                 }
             }
         });
@@ -253,7 +263,6 @@ impl Calendar {
             CalendarContext {
                 padding,
                 padding_top,
-                max_height: height as f64,
                 inner_width: width as f64 - 2.0 * padding,
                 inner_height: height as f64 - padding - padding_top,
                 line_offset: 40.0,

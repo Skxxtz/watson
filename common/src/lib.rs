@@ -1,3 +1,4 @@
+pub mod auth;
 pub mod calendar;
 pub mod errors;
 pub mod notification;

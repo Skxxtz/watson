@@ -30,7 +30,6 @@ async fn main() {
     setup.app.connect_activate(|app| {
         // Load Config
         let config = load_config().unwrap_or_default();
-        println!("{:?}", config);
 
         // Load css
         let provider = CssProvider::new();
