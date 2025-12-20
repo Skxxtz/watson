@@ -476,7 +476,6 @@ fn draw_event(
 }
 
 fn draw_allday_event(ctx: &Context, event: &CalDavEvent, context: &CalendarContext) {
-    println!("{:?}", event);
     let color = event.calendar_info.color.as_deref().unwrap_or("#e9a949");
 
     // Event label

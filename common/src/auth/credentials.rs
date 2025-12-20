@@ -125,11 +125,7 @@ impl CredentialManager {
             .filter_map(|id| {
                 let entry = keyring::Entry::new(&self.service_id, &id).ok()?;
                 let payload = entry.get_secret().ok()?;
-                let c = serde_json::from_slice(&payload).ok();
-                println!("{}", id);
-                println!("{:?}", c);
-
-                c
+                serde_json::from_slice(&payload).ok()
             })
             .collect();
 
