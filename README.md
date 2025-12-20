@@ -1,9 +1,15 @@
+## Available Features:
+
+- Clock Widget
+- Calendar Widget (currently only ICloud Calendar)
+- Battery Widget
+
 
 ## Planned Features:
 
 (Features going extending the functionality of other notification centers)
 
-- Configurable widgets for playing music, calendar, weather, and more
+- Configurable widgets for playing music, weather, and more
 - Classification for notification sources (Mail → Work, Steam → Hobby, VPN → System)
     - Silencing based on notification class
     - Indicator/Different style for notification class
