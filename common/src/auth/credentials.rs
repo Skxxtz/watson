@@ -1,29 +1,25 @@
 use std::collections::HashSet;
 
+use super::tui::CredentialBuilder;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
-use crate::errors::{WatsonError, WatsonErrorType};
-
-#[derive(Serialize)]
-struct BorrowedCredentialPayload<'c> {
-    id: &'c str,
-    username: &'c str,
-    secret: &'c str,
-    label: Option<&'c str>,
-}
+use crate::{
+    auth::tui::CredentialService,
+    errors::{WatsonError, WatsonErrorType},
+};
 
 struct ServiceCredentialIndex {
     index_entry: keyring::Entry,
     index: HashSet<String>,
 }
 
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Credential {
     pub id: String,
     pub username: String,
     pub secret: String,
-    pub label: Option<String>,
+    pub label: String,
 }
 
 pub struct CredentialManager {
@@ -65,10 +61,10 @@ impl CredentialManager {
 
     pub fn store(
         &mut self,
-        username: &str,
-        secret: &str,
-        label: Option<&str>,
-    ) -> Result<String, WatsonError> {
+        username: String,
+        secret: String,
+        label: String,
+    ) -> Result<Credential, WatsonError> {
         // Retrieve Index
         let &mut ServiceCredentialIndex {
             ref index_entry,
@@ -81,29 +77,27 @@ impl CredentialManager {
             id = Uuid::new_v4().to_string();
         }
 
-        {
-            // Create payload
-            let payload = BorrowedCredentialPayload {
-                id: &id,
-                username,
-                secret,
-                label,
-            };
-            let payload_json = serde_json::to_vec(&payload).map_err(|e| WatsonError {
-                r#type: WatsonErrorType::Serialization,
-                error: e.to_string(),
-            })?;
+        // Create payload
+        let payload = Credential {
+            id: id.clone(),
+            username,
+            secret,
+            label,
+        };
+        let payload_json = serde_json::to_vec(&payload).map_err(|e| WatsonError {
+            r#type: WatsonErrorType::Serialization,
+            error: e.to_string(),
+        })?;
 
-            // Set entry
-            let entry = keyring::Entry::new(&self.service_id, &id).map_err(|e| WatsonError {
-                r#type: WatsonErrorType::CredentialEntry,
-                error: e.to_string(),
-            })?;
-            entry.set_secret(&payload_json).map_err(|e| WatsonError {
-                r#type: WatsonErrorType::CredentialEntry,
-                error: e.to_string(),
-            })?;
-        }
+        // Set entry
+        let entry = keyring::Entry::new(&self.service_id, &id).map_err(|e| WatsonError {
+            r#type: WatsonErrorType::CredentialEntry,
+            error: e.to_string(),
+        })?;
+        entry.set_secret(&payload_json).map_err(|e| WatsonError {
+            r#type: WatsonErrorType::CredentialEntry,
+            error: e.to_string(),
+        })?;
 
         // Update index
         index.insert(id.clone());
@@ -118,7 +112,7 @@ impl CredentialManager {
                 error: e.to_string(),
             })?;
 
-        Ok(id)
+        Ok(payload)
     }
 
     pub fn get_credentials(&self) -> Result<Vec<Credential>, WatsonError> {
@@ -142,6 +136,66 @@ impl CredentialManager {
         Ok(creds)
     }
 
+    pub fn get_credential_builders(
+        &self,
+        service: CredentialService,
+    ) -> Result<Vec<CredentialBuilder>, WatsonError> {
+        Ok(self
+            .get_credentials()?
+            .into_iter()
+            .map(|c| CredentialBuilder::from_credential(c, service))
+            .collect())
+    }
+
+    pub fn update_credential(&mut self, new: CredentialBuilder) -> Result<(), WatsonError> {
+        let ServiceCredentialIndex { index, .. } = &self.index;
+
+        // Return if no id
+        let id = new.id.clone().ok_or(WatsonError {
+            r#type: WatsonErrorType::UndefinedAttribute,
+            error: "Credential builder id is not set.".into(),
+        })?;
+
+        // Return if invalid id
+        if !index.contains(&id) {
+            return Err(WatsonError {
+                r#type: WatsonErrorType::InvalidAttribute,
+                error: format!("Credential builder id is not yet stored."),
+            });
+        }
+
+        // Destructure Credential Builder
+        let CredentialBuilder {
+            username,
+            secret,
+            label,
+            ..
+        } = new;
+
+        // Create payload
+        let payload = Credential {
+            id: id.clone(),
+            username,
+            secret,
+            label,
+        };
+        let payload_json = serde_json::to_vec(&payload).map_err(|e| WatsonError {
+            r#type: WatsonErrorType::Serialization,
+            error: e.to_string(),
+        })?;
+
+        // Update entry
+        let entry = keyring::Entry::new(&self.service_id, &id).map_err(|e| WatsonError {
+            r#type: WatsonErrorType::CredentialEntry,
+            error: e.to_string(),
+        })?;
+        entry.set_secret(&payload_json).map_err(|e| WatsonError {
+            r#type: WatsonErrorType::CredentialEntry,
+            error: e.to_string(),
+        })?;
+
+        Ok(())
+    }
     pub fn remove_credential(&mut self, id: &str) -> Result<(), WatsonError> {
         let &mut ServiceCredentialIndex {
             ref index_entry,

@@ -1,5 +1,6 @@
 pub mod auth;
 pub mod calendar;
+pub mod config;
 pub mod errors;
 pub mod notification;
 pub mod protocol;

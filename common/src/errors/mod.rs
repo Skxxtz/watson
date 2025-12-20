@@ -8,7 +8,9 @@ pub enum WatsonErrorType {
     HttpGetRequest,
     Deserialization,
     Serialization,
+
     UndefinedAttribute,
+    InvalidAttribute,
 
     FileOpen,
 

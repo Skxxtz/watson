@@ -8,7 +8,7 @@ use crate::{
         widgets::{Battery, Calendar, Clock},
     },
 };
-use common::protocol::Request;
+use common::{config::flags::ArgParse, protocol::Request};
 use gtk4::{
     Application, Box, CssProvider,
     gdk::Display,
@@ -26,6 +26,7 @@ mod ui;
 
 #[tokio::main]
 async fn main() {
+    ArgParse::parse(std::env::args());
     let setup = setup();
     setup.app.connect_activate(|app| {
         // Load Config
