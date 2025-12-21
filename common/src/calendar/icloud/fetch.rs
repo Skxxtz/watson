@@ -83,12 +83,12 @@ impl PropfindInterface {
             .await
             .map_err(|e| WatsonError {
                 r#type: WatsonErrorType::HttpGetRequest,
-                error: e.to_string(),
+                e: e.to_string(),
             })?;
 
         let text = resp.text().await.map_err(|e| WatsonError {
             r#type: WatsonErrorType::Deserialization,
-            error: e.to_string(),
+            e: e.to_string(),
         })?;
 
         Ok(text)
@@ -100,7 +100,7 @@ impl PropfindInterface {
         if text.is_empty() {
             return Err(WatsonError {
                 r#type: WatsonErrorType::HttpGetRequest,
-                error: "Request parameters are wrong.".into(),
+                e: "Request parameters are wrong.".into(),
             });
         }
 
@@ -138,7 +138,7 @@ impl PropfindInterface {
         let Some(principal) = &self.principal else {
             return Err(WatsonError {
                 r#type: WatsonErrorType::UndefinedAttribute,
-                error: "Principal is not defined.Principal is not defined.".into(),
+                e: "Principal is not defined.Principal is not defined.".into(),
             });
         };
         let request = PropfindRequest::Calendars {
@@ -356,7 +356,7 @@ impl TryFrom<IcalEvent> for CalDavEvent {
                 "UID" => {
                     out.uid = prop.value.ok_or_else(|| WatsonError {
                         r#type: WatsonErrorType::Deserialization,
-                        error: "ICalEvent missing UID".into(),
+                        e: "ICalEvent missing UID".into(),
                     })?;
                 }
 
@@ -403,7 +403,7 @@ impl TryFrom<IcalEvent> for CalDavEvent {
         } else {
             return Err(WatsonError {
                 r#type: WatsonErrorType::Deserialization,
-                error: "Failed to deserialize ICalEvent into CalDavEvent. (Missing start event)"
+                e: "Failed to deserialize ICalEvent into CalDavEvent. (Missing start event)"
                     .into(),
             });
         };
@@ -411,7 +411,7 @@ impl TryFrom<IcalEvent> for CalDavEvent {
         if out.uid.is_empty() {
             Err(WatsonError {
                 r#type: WatsonErrorType::Deserialization,
-                error: "Failed to deserialize ICalEvent into CalDavEvent. (Empty UID)".into(),
+                e: "Failed to deserialize ICalEvent into CalDavEvent. (Empty UID)".into(),
             })
         } else {
             Ok(out)
@@ -441,7 +441,7 @@ impl CalDavEvent {
         } else {
             let (start_day, end_day) = match (start, self.end.as_ref()) {
                 (DateTimeSpec::Date(s), Some(DateTimeSpec::Date(e))) => {
-                    (*s, *e - Duration::days(-1))
+                    (*s, *e - Duration::days(1))
                 }
                 (DateTimeSpec::Date(s), None) => (*s, *s),
                 (
