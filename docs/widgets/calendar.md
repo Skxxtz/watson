@@ -1,11 +1,25 @@
 # Calendar
 
-## ICloud
+## Credential Storage and Security
 
-Watson can automatically connect to your ICloud calendars. For this to work, it
+Watson stores calendar credentials encrypted on the local system to protect against accidental disclosure and casual inspection (for example via backups or configuration files).
+
+Credentials are encrypted using a randomly generated master key and modern authenticated encryption. The master key is stored locally and is not transmitted or shared. This design allows Watson to retrieve calendar data unattended after login, without requiring additional user interaction or desktop-specific keyring services.
+
+This approach provides protection for data at rest but does not protect against malware running under the user account, a compromised system, or direct memory access while the application is running.
+
+Watson does not rely on external credential managers or operating-system keyrings to ensure predictable behavior across environments.
+
+Watson uses XChaCha20-Poly1305 for password encryption.
+
+## Supported Services
+
+### iCloud
+
+Watson can automatically connect to your iCloud calendars. For this to work, it
 needs (1) your AppleID, and (2) an app-specific password.
 
-### Configuration on ICloud
+#### Configuration on iCloud
 
 1. Go to icloud.com
 2. Sign-In
@@ -17,19 +31,12 @@ needs (1) your AppleID, and (2) an app-specific password.
 
 #### Configuration in Watson
 
-> [!IMPORTANT]
-> Watson stores your credentials securely using your system's keyring service.
-> Ensure it is installed and running before proceeding. 
-
-
 1. Launch Watson's Authentication TUI with:
 ```bash
 watson auth
 ```
 2. Choose `Configure New Account` from the menu.
-3. Select ***ICloud*** as the service
+3. Select ***iCloud*** as the service
 4. Enter your **Apple ID** and the **app-specific password** you created on iCloud.
-5. Give the account a descriptive label (e.g., "Personal ICloud").
-6. Save your credentials by pressing `<RETURN>`. Watson will now securely store
-   them in the system keyring and use them to access your calendar events
-   automatically.
+5. Give the account a descriptive label (e.g., "Personal iCloud").
+6. Save your credentials by pressing `<RETURN>`. 

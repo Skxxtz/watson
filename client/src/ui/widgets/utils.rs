@@ -116,6 +116,13 @@ impl Rgba {
             a: clamp(self.a + (other.a - self.a) * t),
         }
     }
+
+    pub fn perceived_brightness_gamma(&self) -> f64 {
+        let r = self.r.powf(2.2);
+        let g = self.g.powf(2.2);
+        let b = self.b.powf(2.2);
+        (0.299 * r + 0.587 * g + 0.114 * b).powf(1.0 / 2.2)
+    }
 }
 
 #[derive(Debug, Clone, Copy)]

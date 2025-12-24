@@ -1,7 +1,8 @@
 use std::fs::File;
 use std::{io::BufReader, path::PathBuf};
 
-use common::errors::{WatsonError, WatsonErrorType};
+use common::errors::{WatsonError, WatsonErrorKind};
+use common::watson_err;
 use serde::{Deserialize, Serialize};
 
 use crate::ui::widgets::HandStyle;
@@ -119,17 +120,13 @@ pub fn load_config() -> Result<Vec<WidgetSpec>, WatsonError> {
     let home = std::env::var("HOME").unwrap();
     let loc = PathBuf::from(home).join(".config/watson/fallback.json");
 
-    let file = File::open(loc).map_err(|e| WatsonError {
-        r#type: WatsonErrorType::FileOpen,
-        error: e.to_string(),
-    })?;
+    let file =
+        File::open(loc).map_err(|e| watson_err!(WatsonErrorKind::FileOpen, e.to_string()))?;
 
     let reader = BufReader::new(file);
 
-    serde_json::from_reader::<_, Vec<WidgetSpec>>(reader).map_err(|e| WatsonError {
-        r#type: WatsonErrorType::Deserialization,
-        error: e.to_string(),
-    })
+    serde_json::from_reader::<_, Vec<WidgetSpec>>(reader)
+        .map_err(|e| watson_err!(WatsonErrorKind::Deserialization, e.to_string()))
 }
 
 fn default_font() -> String {

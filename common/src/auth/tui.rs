@@ -3,59 +3,38 @@ use std::{
     io::{Read, StdinLock, Write, stdin, stdout},
 };
 
-use crate::auth::{Credential, CredentialManager, credentials};
+use serde::{Deserialize, Serialize};
 
-#[derive(Default, Debug, Clone)]
-pub struct CredentialBuilder {
-    pub id: Option<String>,
-    pub service: CredentialService,
-    pub username: String,
-    pub secret: String,
-    pub label: String,
-}
-impl CredentialBuilder {
-    pub fn from_credential(cred: Credential, service: CredentialService) -> Self {
-        Self {
-            id: Some(cred.id),
-            service,
-            username: cred.username,
-            secret: cred.secret,
-            label: cred.label,
-        }
-    }
-}
+use crate::{
+    auth::{Credential, CredentialManager, credentials::CredentialSecret},
+    errors::WatsonError,
+};
+
 // ---------- TUI ----------
 
 pub struct AuthTui<'a> {
     stdin: StdinLock<'a>,
-    credentials: Vec<CredentialBuilder>,
+    manager: CredentialManager,
     _guard: RawModeGuard,
 }
 
 impl<'a> AuthTui<'a> {
-    pub fn new() -> Self {
+    pub fn new() -> Result<Self, WatsonError> {
         let stdin = stdin();
         let stdin_lock = stdin.lock();
 
         let guard = RawModeGuard::new().expect("Failed to enable raw mode");
-        let credentials: Vec<CredentialBuilder> = CredentialService::ALL
-            .into_iter()
-            .filter_map(|s| {
-                CredentialManager::new(&s.name())
-                    .and_then(|m| m.get_credential_builders(s))
-                    .ok()
-            })
-            .flatten()
-            .collect();
+        let mut manager = CredentialManager::new()?;
+        manager.unlock()?;
 
-        Self {
+        Ok(Self {
             _guard: guard,
             stdin: stdin_lock,
-            credentials,
-        }
+            manager,
+        })
     }
 
-    pub fn run(&mut self) {
+    pub fn run(&mut self) -> Result<(), WatsonError> {
         let mut state = UiState::MainMenu;
         let mut menu = MenuState { selected: 0 };
 
@@ -70,15 +49,15 @@ impl<'a> AuthTui<'a> {
                 UiState::NewAccount(s) => {
                     render_new_account(s);
                     if let Some(next) =
-                        update_new_account(s, read_input(&mut self.stdin), &mut self.credentials)
+                        update_new_account(s, read_input(&mut self.stdin), &mut self.manager)?
                     {
                         state = next;
                     }
                 }
                 UiState::ManageAccounts(s) => {
-                    render_manage(s, &self.credentials);
+                    render_manage(s, &self.manager);
                     if let Some(next) =
-                        update_manage(s, read_input(&mut self.stdin), &mut self.credentials)
+                        update_manage(s, read_input(&mut self.stdin), &mut self.manager)
                     {
                         state = next;
                     }
@@ -88,32 +67,32 @@ impl<'a> AuthTui<'a> {
                     if let Some(next) = update_manage_options_menu(
                         s,
                         read_input(&mut self.stdin),
-                        &mut self.credentials,
-                    ) {
+                        &mut self.manager,
+                    )? {
                         state = next;
                     }
                 }
                 UiState::Edit(s) => {
-                    render_edit(s, &mut self.credentials);
+                    render_edit(s, &mut self.manager);
                     if let Some(next) =
-                        update_edit(s, read_input(&mut self.stdin), &mut self.credentials)
+                        update_edit(s, read_input(&mut self.stdin), &mut self.manager)?
                     {
                         state = next;
                     }
                 }
                 UiState::ServiceEdit(s) => {
                     render_service_selection(s);
-                    if let Some(next) = update_service_selection(
-                        s,
-                        read_input(&mut self.stdin),
-                        &mut self.credentials,
-                    ) {
+                    if let Some(next) =
+                        update_service_selection(s, read_input(&mut self.stdin), &mut self.manager)
+                    {
                         state = next;
                     }
                 }
                 UiState::Quit => break,
             }
         }
+
+        Ok(())
     }
 }
 
@@ -170,7 +149,7 @@ enum AccountField {
     Save,
 }
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, Deserialize, Serialize)]
 pub enum CredentialService {
     Icloud,
     None,
@@ -178,13 +157,6 @@ pub enum CredentialService {
 impl CredentialService {
     const LEN: usize = 2;
     const ALL: [Self; 1] = [Self::Icloud];
-    fn name(&self) -> String {
-        let st = match self {
-            Self::Icloud => "icloud",
-            Self::None => "",
-        };
-        st.to_string()
-    }
     fn itos(index: usize) -> Self {
         match index {
             0 => Self::Icloud,
@@ -220,7 +192,7 @@ struct NewAccountState {
 struct EditState {
     field: AccountField,
     cred: usize,
-    initial_secret: String,
+    initial_secret: CredentialSecret,
 }
 
 struct ServiceSelectState {
@@ -353,8 +325,8 @@ fn render_new_account(s: &NewAccountState) {
 fn update_new_account(
     s: &mut NewAccountState,
     input: Input,
-    credntials: &mut Vec<CredentialBuilder>,
-) -> Option<UiState> {
+    manager: &mut CredentialManager,
+) -> Result<Option<UiState>, WatsonError> {
     let current = match s.field {
         AccountField::Username => Some(&mut s.username),
         AccountField::Password => Some(&mut s.secret),
@@ -391,40 +363,41 @@ fn update_new_account(
         {
             s.field = match s.field {
                 AccountField::Service => {
-                    return Some(UiState::ServiceEdit(ServiceSelectState {
+                    return Ok(Some(UiState::ServiceEdit(ServiceSelectState {
                         return_target: ServiceReturnTarget::NewAccount,
                         cred_index: None,
                         selected: 0,
-                    }));
+                    })));
                 }
                 AccountField::Username => AccountField::Password,
                 AccountField::Password => AccountField::Label,
                 AccountField::Label => {
                     // Save to credential manager
-                    if let Ok(mut manager) = CredentialManager::new(&s.service.name()) {
-                        if let Ok(cred) =
-                            manager.store(s.username.clone(), s.secret.clone(), s.label.clone())
-                        {
-                            credntials.push(CredentialBuilder::from_credential(cred, s.service));
-                        }
-                    }
+                    let cred = Credential::new(
+                        s.username.clone(),
+                        s.secret.clone(),
+                        s.service,
+                        s.label.clone(),
+                    );
+                    manager.insert(cred);
+                    manager.save()?;
 
-                    return Some(UiState::MainMenu);
+                    return Ok(Some(UiState::MainMenu));
                 }
                 _ => AccountField::Service,
             };
         }
-        Input::Esc => return Some(UiState::MainMenu),
+        Input::Esc => return Ok(Some(UiState::MainMenu)),
         _ => {}
     }
-    None
+    Ok(None)
 }
 
 // ---------- Service Selection ------------
 fn update_service_selection(
     state: &mut ServiceSelectState,
     input: Input,
-    credentials: &mut [CredentialBuilder],
+    manager: &mut CredentialManager,
 ) -> Option<UiState> {
     match input {
         Input::Up if state.selected > 0 => state.selected -= 1,
@@ -434,7 +407,7 @@ fn update_service_selection(
         Input::Enter => {
             return Some(match state.return_target {
                 ServiceReturnTarget::EditAccount => {
-                    let current = &mut credentials[state.cred_index.unwrap()];
+                    let current = &mut manager.credentials[state.cred_index.unwrap()];
                     println!(
                         "{} - {} - {}",
                         current.secret, current.username, current.label
@@ -473,15 +446,17 @@ fn render_service_selection(state: &mut ServiceSelectState) {
 }
 // ---------- Manage accounts ----------
 
-fn render_manage(s: &ManageState, creds: &[CredentialBuilder]) {
+fn render_manage(s: &ManageState, creds: &CredentialManager) {
     clear();
     println!("Accounts:\n");
 
-    for (i, c) in creds.iter().enumerate() {
-        if i == s.selected {
-            println!("> {} ({})", c.label, c.username);
-        } else {
-            println!("  {} ({})", c.label, c.username);
+    for (i, c) in creds.credentials.iter().enumerate() {
+        if let CredentialSecret::Decrypted(ref username) = c.username {
+            if i == s.selected {
+                println!("> {} ({})", c.label, username);
+            } else {
+                println!("  {} ({})", c.label, username);
+            }
         }
     }
 
@@ -491,11 +466,11 @@ fn render_manage(s: &ManageState, creds: &[CredentialBuilder]) {
 fn update_manage(
     s: &mut ManageState,
     input: Input,
-    creds: &mut Vec<CredentialBuilder>,
+    manager: &CredentialManager,
 ) -> Option<UiState> {
     match input {
         Input::Up if s.selected > 0 => s.selected -= 1,
-        Input::Down | Input::Tab if s.selected < creds.len() - 1 => s.selected += 1,
+        Input::Down | Input::Tab if s.selected < manager.credentials.len() - 1 => s.selected += 1,
         Input::Esc => return Some(UiState::MainMenu),
         Input::Enter => {
             return Some(UiState::ManageOptions(ManageOptionsState {
@@ -511,17 +486,17 @@ fn update_manage(
 fn update_manage_options_menu(
     state: &mut ManageOptionsState,
     input: Input,
-    credentials: &mut Vec<CredentialBuilder>,
-) -> Option<UiState> {
+    manager: &mut CredentialManager,
+) -> Result<Option<UiState>, WatsonError> {
     match input {
         Input::Up if state.selected > 0 => state.selected -= 1,
         Input::Down | Input::Tab if state.selected < ManageOptionsState::OPTIONS.len() - 1 => {
             state.selected += 1
         }
         Input::Enter => {
-            let current = &mut credentials[state.cred_index];
-            return Some(match state.selected {
+            return Ok(Some(match state.selected {
                 0 => {
+                    let current = &mut manager.credentials[state.cred_index];
                     let edit_state = EditState {
                         field: AccountField::Service,
                         cred: state.cred_index,
@@ -531,13 +506,8 @@ fn update_manage_options_menu(
                 }
                 1 => {
                     // Remove entry from credential manager
-                    if let Some(id) = &current.id {
-                        CredentialManager::new(&current.service.name())
-                            .ok()
-                            .and_then(|mut manager| manager.remove_credential(id).ok())
-                            .map(|_| {
-                                credentials.remove(state.cred_index);
-                            });
+                    if manager.delete_index(state.selected).is_some() {
+                        manager.save()?;
                     }
 
                     UiState::ManageAccounts(ManageState {
@@ -545,11 +515,11 @@ fn update_manage_options_menu(
                     })
                 }
                 _ => UiState::Quit,
-            });
+            }));
         }
         _ => {}
     }
-    None
+    Ok(None)
 }
 
 fn render_manage_options_menu(selected: usize) {
@@ -566,8 +536,8 @@ fn render_manage_options_menu(selected: usize) {
 
 // --------- Edit View ------------
 //
-fn render_edit(s: &EditState, credentials: &mut [CredentialBuilder]) {
-    let cred = &mut credentials[s.cred];
+fn render_edit(s: &EditState, manager: &mut CredentialManager) {
+    let cred = &mut manager.credentials[s.cred];
     clear();
     println!("Edit Account:\n");
 
@@ -591,15 +561,17 @@ fn render_edit(s: &EditState, credentials: &mut [CredentialBuilder]) {
         cred.username
     );
 
-    println!(
-        "{} Password: {}",
-        if matches!(s.field, AccountField::Password) {
-            ">"
-        } else {
-            " "
-        },
-        "*".repeat(cred.secret.len())
-    );
+    if let CredentialSecret::Decrypted(ref secret) = cred.secret {
+        println!(
+            "{} Password: {}",
+            if matches!(s.field, AccountField::Password) {
+                ">"
+            } else {
+                " "
+            },
+            "*".repeat(secret.len())
+        );
+    }
 
     println!(
         "{} Label: {}",
@@ -633,25 +605,41 @@ fn render_edit(s: &EditState, credentials: &mut [CredentialBuilder]) {
 fn update_edit(
     s: &mut EditState,
     input: Input,
-    credentials: &mut [CredentialBuilder],
-) -> Option<UiState> {
-    let cred = &mut credentials[s.cred];
+    manager: &mut CredentialManager,
+) -> Result<Option<UiState>, WatsonError> {
+    let cred = &mut manager.credentials[s.cred];
     let current = match s.field {
         AccountField::Username => Some(&mut cred.username),
         AccountField::Password => Some(&mut cred.secret),
-        AccountField::Label => Some(&mut cred.label),
         _ => None,
+    };
+    let current_text = if current.is_none() {
+        match s.field {
+            AccountField::Label => Some(&mut cred.label),
+            _ => None,
+        }
+    } else {
+        None
     };
 
     match input {
         Input::Char(c) => {
-            current.map(|f| f.push(c));
+            if let Some(CredentialSecret::Decrypted(value)) = current {
+                value.push(c);
+            }
+            current_text.map(|f| f.push(c));
         }
         Input::String(s) => {
-            current.map(|f| f.push_str(&s));
+            if let Some(CredentialSecret::Decrypted(value)) = current {
+                value.push_str(&s);
+            }
+            current_text.map(|f| f.push_str(&s));
         }
         Input::Backspace => {
-            current.map(|f| f.pop());
+            if let Some(CredentialSecret::Decrypted(value)) = current {
+                value.pop();
+            }
+            current_text.map(|f| f.pop());
         }
         Input::Down | Input::Tab if matches!(s.field, AccountField::Service) => {
             if !matches!(cred.service, CredentialService::None) {
@@ -671,34 +659,34 @@ fn update_edit(
             s.field = match s.field {
                 AccountField::Service => {
                     cred.secret = std::mem::take(&mut s.initial_secret);
-                    return Some(UiState::ServiceEdit(ServiceSelectState {
+                    return Ok(Some(UiState::ServiceEdit(ServiceSelectState {
                         cred_index: Some(s.cred),
                         return_target: ServiceReturnTarget::EditAccount,
                         selected: 0,
-                    }));
+                    })));
                 }
                 AccountField::Username => AccountField::Password,
                 AccountField::Password => AccountField::Label,
                 AccountField::Label => AccountField::Save,
                 AccountField::Save => {
+                    // Important: return the initial secret if it wasnt changed
                     if cred.secret.is_empty() {
                         cred.secret = std::mem::take(&mut s.initial_secret);
                     }
 
                     // Save
-                    let _ = CredentialManager::new(&cred.service.name())
-                        .and_then(|mut m| m.update_credential(cred.clone()));
+                    manager.save()?;
 
-                    return Some(UiState::ManageAccounts(ManageState { selected: 0 }));
+                    return Ok(Some(UiState::ManageAccounts(ManageState { selected: 0 })));
                 }
             };
         }
         Input::Esc => {
             cred.secret = std::mem::take(&mut s.initial_secret);
-            return Some(UiState::ManageAccounts(ManageState { selected: 0 }));
+            return Ok(Some(UiState::ManageAccounts(ManageState { selected: 0 })));
         }
     }
-    None
+    Ok(None)
 }
 
 // ---------- Terminal utils ----------

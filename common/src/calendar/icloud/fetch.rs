@@ -13,7 +13,7 @@ use reqwest::{
 };
 
 use crate::{
-    auth::Credential,
+    auth::{Credential, CredentialSecret},
     calendar::{
         icloud::protocol::PropfindRequest,
         utils::{
@@ -21,7 +21,8 @@ use crate::{
             structs::{Attendee, DateTimeSpec, RecurrenceRule},
         },
     },
-    errors::{WatsonError, WatsonErrorType},
+    errors::{WatsonError, WatsonErrorKind},
+    watson_err,
 };
 
 // Go to icloud.com
@@ -36,8 +37,8 @@ use crate::{
 pub struct PropfindInterface {
     client: Client,
     headers: HeaderMap,
-    username: String,
-    password: String,
+    username: CredentialSecret,
+    password: CredentialSecret,
     principal: Option<String>,
 }
 impl PropfindInterface {
@@ -81,15 +82,12 @@ impl PropfindInterface {
             .body(body)
             .send()
             .await
-            .map_err(|e| WatsonError {
-                r#type: WatsonErrorType::HttpGetRequest,
-                e: e.to_string(),
-            })?;
+            .map_err(|e| watson_err!(WatsonErrorKind::HttpGetRequest, e.to_string()))?;
 
-        let text = resp.text().await.map_err(|e| WatsonError {
-            r#type: WatsonErrorType::Deserialization,
-            e: e.to_string(),
-        })?;
+        let text = resp
+            .text()
+            .await
+            .map_err(|e| watson_err!(WatsonErrorKind::Deserialization, e.to_string()))?;
 
         Ok(text)
     }
@@ -98,10 +96,10 @@ impl PropfindInterface {
         let text = self.make_request(request).await?;
 
         if text.is_empty() {
-            return Err(WatsonError {
-                r#type: WatsonErrorType::HttpGetRequest,
-                e: "Request parameters are wrong.".into(),
-            });
+            return Err(watson_err!(
+                WatsonErrorKind::HttpGetRequest,
+                "Request parameters are wrong."
+            ));
         }
 
         // Read Principal
@@ -136,10 +134,10 @@ impl PropfindInterface {
     }
     pub async fn get_calendars(&mut self) -> Result<Vec<IcloudCalendarInfo>, WatsonError> {
         let Some(principal) = &self.principal else {
-            return Err(WatsonError {
-                r#type: WatsonErrorType::UndefinedAttribute,
-                e: "Principal is not defined.Principal is not defined.".into(),
-            });
+            return Err(watson_err!(
+                WatsonErrorKind::UndefinedAttribute,
+                "Principal is not defined.Principal is not defined."
+            ));
         };
         let request = PropfindRequest::Calendars {
             principal: principal.to_string(),
@@ -354,9 +352,8 @@ impl TryFrom<IcalEvent> for CalDavEvent {
         for prop in value.properties {
             match prop.name.as_str() {
                 "UID" => {
-                    out.uid = prop.value.ok_or_else(|| WatsonError {
-                        r#type: WatsonErrorType::Deserialization,
-                        e: "ICalEvent missing UID".into(),
+                    out.uid = prop.value.ok_or_else(|| {
+                        watson_err!(WatsonErrorKind::Deserialization, "ICalEvent missing UID")
                     })?;
                 }
 
@@ -401,18 +398,17 @@ impl TryFrom<IcalEvent> for CalDavEvent {
                 _ => CalEventType::AllDay,
             }
         } else {
-            return Err(WatsonError {
-                r#type: WatsonErrorType::Deserialization,
-                e: "Failed to deserialize ICalEvent into CalDavEvent. (Missing start event)"
-                    .into(),
-            });
+            return Err(watson_err!(
+                WatsonErrorKind::Deserialization,
+                "Failed to deserialize ICalEvent into CalDavEvent. (Missing start event)"
+            ));
         };
 
         if out.uid.is_empty() {
-            Err(WatsonError {
-                r#type: WatsonErrorType::Deserialization,
-                e: "Failed to deserialize ICalEvent into CalDavEvent. (Empty UID)".into(),
-            })
+            Err(watson_err!(
+                WatsonErrorKind::Deserialization,
+                "Failed to deserialize ICalEvent into CalDavEvent. (Empty UID)"
+            ))
         } else {
             Ok(out)
         }
@@ -604,24 +600,29 @@ impl CalDavEvent {
 
                 "DAILY" => return num_days % interval == 0,
                 "WEEKLY" => {
-                    let start_of_week = dt_start.date_naive()
-                        - Duration::days(dt_start.weekday().num_days_from_monday() as i64);
-                    let target_start_of_week = target.date_naive()
-                        - Duration::days(target.weekday().num_days_from_monday() as i64);
+                    let start_week = dt_start.iso_week().week() as i32;
+                    let target_week = target.iso_week().week() as i32;
+                    let start_year = dt_start.year();
+                    let target_year = target.year();
 
-                    let weeks_since = (target_start_of_week - start_of_week).num_days() / 7;
+                    let mut weeks_since =
+                        (target_year - start_year) * 52 + (target_week - start_week);
+
+                    // Adjust for negative differences
+                    if target.date_naive() < dt_start.date_naive() {
+                        weeks_since = weeks_since.abs();
+                    }
 
                     if (weeks_since as i64).abs() % interval != 0 {
                         return false;
                     }
 
-                    if map.get("BYDAY").is_none() {
-                        if target.weekday() != dt_start.weekday() {
-                            return false;
-                        }
-                    }
+                    let interval = map
+                        .get("INTERVAL")
+                        .and_then(|i| i.parse::<i64>().ok())
+                        .unwrap_or(1);
 
-                    return true;
+                    return (weeks_since as i64) % interval == 0;
                 }
                 "MONTHLY" => {
                     let months_since = (target.year() - dt_start.year()) * 12

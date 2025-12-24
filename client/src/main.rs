@@ -26,7 +26,8 @@ mod ui;
 
 #[tokio::main]
 async fn main() {
-    ArgParse::parse(std::env::args());
+    let x = ArgParse::parse(std::env::args());
+    println!("{:?}", x);
     let setup = setup();
     setup.app.connect_activate(|app| {
         // Load Config

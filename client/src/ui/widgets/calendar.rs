@@ -123,15 +123,19 @@ impl Calendar {
             let events_allday = Rc::clone(&events_allday);
             let state = Rc::clone(&state);
             async move {
-                let credentials =
-                    match CredentialManager::new("icloud").and_then(|m| m.get_credentials()) {
-                        Ok(m) => m,
-                        Err(e) => {
-                            eprintln!("{:?}", e);
-                            return;
-                        }
-                    };
-                for account in credentials {
+                let mut credential_manager = match CredentialManager::new() {
+                    Ok(m) => m,
+                    Err(e) => {
+                        eprintln!("{:?}", e);
+                        return;
+                    }
+                };
+                if let Err(e) = credential_manager.unlock() {
+                    eprintln!("{:?}", e);
+                    return;
+                }
+
+                for account in credential_manager.credentials {
                     let mut interface = PropfindInterface::new(account);
                     match interface.get_principal().await {
                         Ok(_) => match interface.get_calendars().await {
@@ -342,8 +346,9 @@ impl Calendar {
             gtk4::cairo::FontWeight::Bold,
         );
 
+        let mut allday_x_offset = 0.0;
         for event in events_allday {
-            draw_allday_event(ctx, event, &context);
+            draw_allday_event(ctx, event, &context, &mut allday_x_offset);
         }
         for event in events_timed {
             draw_event(ctx, event, &context, state.progress.get());
@@ -379,6 +384,7 @@ fn draw_event(
     context: &CalendarContext,
     progress: f64,
 ) -> Option<()> {
+    println!("\n\n\n");
     let event_start = event.start.as_ref()?;
     let event_end = event.end.as_ref()?;
     let start_time = match event_start {
@@ -449,7 +455,12 @@ fn draw_event(
 
     // Event label
     ctx.set_font_size(11.0);
-    ctx.set_source_rgba(1.0, 1.0, 1.0, 0.5 * progress);
+    ctx.set_source_rgba(
+        0.0,
+        0.0,
+        0.0,
+        0.7 * event_color.perceived_brightness_gamma() * progress,
+    );
     let summary = event.summary.as_deref().unwrap_or("Untitled Event");
     let time = start_time.time().format("%H:%M").to_string();
 
@@ -475,7 +486,13 @@ fn draw_event(
     Some(())
 }
 
-fn draw_allday_event(ctx: &Context, event: &CalDavEvent, context: &CalendarContext) {
+fn draw_allday_event(
+    ctx: &Context,
+    event: &CalDavEvent,
+    context: &CalendarContext,
+    x_offset: &mut f64,
+) {
+    println!("{:?}", event);
     let color = event.calendar_info.color.as_deref().unwrap_or("#e9a949");
 
     // Event label
@@ -485,8 +502,10 @@ fn draw_allday_event(ctx: &Context, event: &CalDavEvent, context: &CalendarConte
     // Subtract x_bearing here to align ink to padding
     let width = extent.width() + 10.0;
     let height = extent.height() + 10.0;
-    let x_start = context.padding - extent.x_bearing();
+    let x_start = context.padding - extent.x_bearing() + *x_offset;
     let y_start = context.padding_top - 15.0 - height;
+
+    *x_offset += width + 5.0;
 
     let event_color = Rgba::from_str(color).unwrap_or_default();
     ctx.set_source_rgba(event_color.r, event_color.g, event_color.b, 0.9);
@@ -494,6 +513,11 @@ fn draw_allday_event(ctx: &Context, event: &CalDavEvent, context: &CalendarConte
     ctx.fill().unwrap();
 
     ctx.set_font_size(11.0);
-    ctx.set_source_rgba(0.0, 0.0, 0.0, 0.35);
+    ctx.set_source_rgba(
+        0.0,
+        0.0,
+        0.0,
+        0.7 * event_color.perceived_brightness_gamma(),
+    );
     CairoShapesExt::centered_text(ctx, &title, x_start + width / 2.0, y_start + height / 2.0);
 }
