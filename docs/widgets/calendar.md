@@ -32,11 +32,12 @@ needs (1) your AppleID, and (2) an app-specific password.
 #### Configuration in Watson
 
 1. Launch Watson's Authentication TUI with:
+
 ```bash
 watson auth
 ```
-2. Choose `Configure New Account` from the menu.
-3. Select ***iCloud*** as the service
-4. Enter your **Apple ID** and the **app-specific password** you created on iCloud.
-5. Give the account a descriptive label (e.g., "Personal iCloud").
-6. Save your credentials by pressing `<RETURN>`. 
+1. Choose `Configure New Account` from the menu.
+2. Select ***iCloud*** as the service
+3. Enter your **Apple ID** and the **app-specific password** you created on iCloud.
+4. Give the account a descriptive label (e.g., "Personal iCloud").
+5. Save your credentials by pressing `<RETURN>`.
