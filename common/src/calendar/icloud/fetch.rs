@@ -513,6 +513,7 @@ impl CalDavEvent {
         if let Some(by_day) = map.get("BYDAY") {
             let allowed_days: HashSet<Weekday> = by_day
                 .split(',')
+                .map(|d| d.trim())
                 .filter_map(|d| match d {
                     "MO" => Some(Weekday::Mon),
                     "TU" => Some(Weekday::Tue),
@@ -524,6 +525,11 @@ impl CalDavEvent {
                     _ => None,
                 })
                 .collect();
+            if allowed_days.is_empty() {
+                if target.weekday() != dt_start.weekday() {
+                    return false;
+                }
+            }
             if !allowed_days.contains(&target.weekday()) {
                 return false;
             }
@@ -600,28 +606,23 @@ impl CalDavEvent {
 
                 "DAILY" => return num_days % interval == 0,
                 "WEEKLY" => {
-                    let start_week = dt_start.iso_week().week() as i32;
-                    let target_week = target.iso_week().week() as i32;
-                    let start_year = dt_start.year();
-                    let target_year = target.year();
-
-                    let mut weeks_since =
-                        (target_year - start_year) * 52 + (target_week - start_week);
-
-                    // Adjust for negative differences
-                    if target.date_naive() < dt_start.date_naive() {
-                        weeks_since = weeks_since.abs();
+                    // Early return if day does not match
+                    if map.get("BYDAY").is_some() {
+                        if target.weekday() != dt_start.weekday() {
+                            return false;
+                        }
                     }
 
-                    if (weeks_since as i64).abs() % interval != 0 {
+                    let days = (target.date_naive() - dt_start.date_naive()).num_days();
+                    if days < 0 {
                         return false;
                     }
 
-                    let interval = map
-                        .get("INTERVAL")
-                        .and_then(|i| i.parse::<i64>().ok())
-                        .unwrap_or(1);
+                    if days % 7 != 0 {
+                        return false;
+                    }
 
+                    let weeks_since = days / 7;
                     return (weeks_since as i64) % interval == 0;
                 }
                 "MONTHLY" => {
