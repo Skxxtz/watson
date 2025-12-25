@@ -99,8 +99,10 @@ impl Battery {
                 center: width as f64 / 2.0 + padding,
                 height,
                 line_width: height * 0.1,
+                padding,
             }
         };
+
         ctx.set_source_rgba(color.r, color.g, color.b, color.a);
         ctx.set_line_cap(LineCap::Round);
         ctx.set_line_width(bat.line_width);
@@ -111,13 +113,96 @@ impl Battery {
             bat.height / 2.0 - bat.line_width / 2.0,
             percentage,
         );
-        ctx.stroke().unwrap()
+        ctx.stroke().unwrap();
+
+        ctx.save().unwrap();
+        ctx.translate(bat.center, bat.center);
+        ctx.set_line_width(0.1);
+        ctx.set_line_cap(LineCap::Round);
+        ctx.set_source_rgba(color.r, color.g, color.b, color.a);
+
+        match status.get() {
+            BatteryStatus::Charging(_) => {
+                Self::draw_plug(ctx, &bat);
+            }
+            _ => {
+                Self::draw_bolt(ctx, &bat);
+            }
+        }
+
+        ctx.fill().unwrap();
+        ctx.restore().unwrap();
+    }
+    fn draw_bolt(ctx: &Context, bat: &BatteryContext) {
+        let bolt_size = bat.height * 0.25;
+        ctx.scale(bolt_size, bolt_size);
+        // top point
+        ctx.move_to(0.3, -1.0);
+        ctx.line_to(0.05, -0.15);
+        ctx.line_to(0.65, -0.15);
+        ctx.line_to(-0.3, 1.0);
+        ctx.line_to(-0.1, 0.15);
+        ctx.line_to(-0.6, 0.15);
+        ctx.close_path();
+    }
+    fn draw_plug(ctx: &Context, bat: &BatteryContext) {
+        let size = bat.height * 0.420;
+        ctx.scale(size, size);
+
+        let body_width = 0.6;
+        let body_height = 0.6;
+        let body_x = -body_width / 2.0;
+        let body_y = -body_height / 2.0;
+
+        CairoShapesExt::rounded_rectangle(
+            ctx,
+            body_x,
+            body_y,
+            body_width,
+            body_height,
+            (0.05, 0.05, 0.4, 0.4),
+        );
+        ctx.fill().unwrap();
+
+        // Prongs
+        let prong_width = 0.1;
+        let prong_height = 0.25;
+        let prong_y = body_y - prong_height;
+
+        // Left prong
+        CairoShapesExt::rounded_rectangle(
+            ctx,
+            body_x + 0.1,
+            prong_y,
+            prong_width,
+            prong_height + 0.1,
+            (0.1, 0.1, 0.0, 0.0),
+        );
+        ctx.fill().unwrap();
+
+        // Right prong
+        CairoShapesExt::rounded_rectangle(
+            ctx,
+            body_x + body_width - prong_width - 0.1,
+            prong_y,
+            prong_width,
+            prong_height + 0.1,
+            (0.1, 0.1, 0.0, 0.0),
+        );
+        ctx.fill().unwrap();
+
+        // Optional: cord
+        ctx.set_line_width(0.09);
+        ctx.move_to(0.0, body_y + body_height);
+        ctx.line_to(0.0, body_y + body_height + 0.3);
+        ctx.stroke().unwrap();
     }
 }
 struct BatteryContext {
     center: f64,
     height: f64,
     line_width: f64,
+    padding: f64,
 }
 
 #[derive(Copy, Clone)]

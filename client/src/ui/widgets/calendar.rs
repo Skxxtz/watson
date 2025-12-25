@@ -384,7 +384,6 @@ fn draw_event(
     context: &CalendarContext,
     progress: f64,
 ) -> Option<()> {
-    println!("\n\n\n");
     let event_start = event.start.as_ref()?;
     let event_end = event.end.as_ref()?;
     let start_time = match event_start {
@@ -492,7 +491,6 @@ fn draw_allday_event(
     context: &CalendarContext,
     x_offset: &mut f64,
 ) {
-    println!("{:?}", event);
     let color = event.calendar_info.color.as_deref().unwrap_or("#e9a949");
 
     // Event label
