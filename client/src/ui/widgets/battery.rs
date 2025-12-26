@@ -4,6 +4,11 @@ use crate::{
     config::WidgetSpec,
     ui::widgets::utils::{CairoShapesExt, Rgba, WidgetOption},
 };
+use common::{
+    errors::{WatsonError, WatsonErrorKind},
+    protocol::BatteryState,
+    watson_err,
+};
 use gtk4::{
     Box, DrawingArea,
     cairo::{Context, LineCap},
@@ -19,6 +24,18 @@ pub struct Battery {
 impl Battery {
     pub fn poll_state(&self) {
         self.status.set(BatteryStatus::poll());
+    }
+    pub fn update_state(&self, state: BatteryState) {
+        let status = match BatteryStatus::capacity() {
+            Ok(c) => match state {
+                BatteryState::Full => BatteryStatus::Full(c),
+                BatteryState::Charging => BatteryStatus::Charging(c),
+                BatteryState::Discharging => BatteryStatus::Discharging(c),
+                _ => BatteryStatus::Invalid,
+            },
+            _ => BatteryStatus::Invalid,
+        };
+        self.status.set(status)
     }
     pub fn queue_draw(&self) {
         if let Some(strong) = self.weak.upgrade() {
@@ -112,7 +129,7 @@ impl Battery {
         else {
             return;
         };
-        let Some(percentage) = status.get().percentage() else {
+        let Some(percentage) = status.get().to_percentage() else {
             return;
         };
 
@@ -250,20 +267,7 @@ pub enum BatteryStatus {
 }
 impl BatteryStatus {
     fn poll() -> Self {
-        let capacity_path = "/sys/class/power_supply/BAT0/capacity";
         let status_path = "/sys/class/power_supply/BAT0/status";
-
-        let capacity = {
-            let capacity_opt = std::fs::read_to_string(capacity_path)
-                .expect("Failed to read capacity")
-                .trim()
-                .parse::<u32>();
-
-            match capacity_opt {
-                Ok(c) => c,
-                _ => return Self::Invalid,
-            }
-        };
         let status = {
             let status_opt = std::fs::read_to_string(status_path);
 
@@ -273,6 +277,11 @@ impl BatteryStatus {
             }
         };
 
+        let capacity = match Self::capacity() {
+            Ok(cap) => cap,
+            Err(_) => return Self::Invalid,
+        };
+
         match status.as_str() {
             "discharging" => Self::Discharging(capacity),
             "full" => Self::Full(capacity),
@@ -280,7 +289,23 @@ impl BatteryStatus {
             _ => Self::Invalid,
         }
     }
-    fn percentage(&self) -> Option<f64> {
+    fn capacity() -> Result<u32, WatsonError> {
+        let capacity_path = "/sys/class/power_supply/BAT0/capacity";
+        let capacity = {
+            let capacity_opt = std::fs::read_to_string(capacity_path)
+                .expect("Failed to read capacity")
+                .trim()
+                .parse::<u32>();
+
+            match capacity_opt {
+                Ok(c) => c,
+                Err(e) => return Err(watson_err!(WatsonErrorKind::Deserialization, e.to_string())),
+            }
+        };
+
+        Ok(capacity)
+    }
+    fn to_percentage(&self) -> Option<f64> {
         match self {
             Self::Full(d) => Some(*d as f64 / 100.0),
             Self::Charging(d) => Some(*d as f64 / 100.0),

@@ -59,6 +59,7 @@ async fn main() {
                 create_widgets(&imp.viewport.get(), spec, Rc::clone(&state));
             }
 
+            // Listen async for server responses/notifications
             gtk4::glib::spawn_future_local({
                 let mut rx = rx.resubscribe();
                 let state = Rc::clone(&state);
@@ -66,13 +67,11 @@ async fn main() {
                     while let Ok(buf) = rx.recv().await {
                         match serde_json::from_slice::<Response>(&buf) {
                             Ok(b) => match b {
-                                Response::BatteryStateChange(_) => {
-                                    for each in state.borrow().by_type(WatsonWidgetType::Battery) {
-                                        if let WatsonWidget::Battery(bat) = each {
-                                            bat.poll_state();
-                                            bat.queue_draw();
-                                        }
-                                    }
+                                Response::BatteryStateChange(s) => {
+                                    state.borrow().batteries().for_each(|bat| {
+                                        bat.update_state(s);
+                                        bat.queue_draw();
+                                    });
                                 }
                                 _ => {}
                             },
@@ -183,19 +182,6 @@ fn setup() -> Setup {
     Setup { app }
 }
 
-// async fn connect() {
-//     match ClientConnection::new().await {
-//         Ok(mut c) => {
-//             if let Ok(response) = c.send(Request::PendingNotifications).await {
-//                 println!("{:?}", response);
-//             }
-//         }
-//         Err(e) => {
-//             eprintln!("{:?}", e);
-//         }
-//     }
-// }
-
 async fn connect(sender: broadcast::Sender<Vec<u8>>) {
     match ClientConnection::new().await {
         Ok(c) => {
@@ -248,17 +234,38 @@ pub enum WatsonWidgetType {
 struct UiState {
     widgets: Vec<WatsonWidget>,
 }
+#[allow(dead_code)]
 impl UiState {
     pub fn new() -> Self {
         Self {
             widgets: Vec::new(),
         }
     }
-    pub fn by_type(&self, t: WatsonWidgetType) -> Vec<WatsonWidget> {
-        self.widgets
-            .iter()
-            .filter(|w| w.widget_type() == t)
-            .cloned()
-            .collect()
+    pub fn batteries(&self) -> impl Iterator<Item = &Battery> {
+        self.widgets.iter().filter_map(|w| {
+            if let WatsonWidget::Battery(c) = w {
+                Some(c)
+            } else {
+                None
+            }
+        })
+    }
+    pub fn calendars(&self) -> impl Iterator<Item = &WeakRef<DrawingArea>> {
+        self.widgets.iter().filter_map(|w| {
+            if let WatsonWidget::Calendar(c) = w {
+                Some(c)
+            } else {
+                None
+            }
+        })
+    }
+    pub fn clocks(&self) -> impl Iterator<Item = &WeakRef<DrawingArea>> {
+        self.widgets.iter().filter_map(|w| {
+            if let WatsonWidget::Clock(c) = w {
+                Some(c)
+            } else {
+                None
+            }
+        })
     }
 }
