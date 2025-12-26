@@ -62,6 +62,10 @@ pub enum WidgetSpec {
         #[serde(default = "default_font")]
         font: String,
     },
+    Notifications {
+        #[serde(flatten)]
+        base: WidgetBase,
+    },
     Row {
         #[serde(flatten)]
         base: WidgetBase,
@@ -85,6 +89,7 @@ impl WidgetSpec {
             Self::Battery { base, .. } => Some(base),
             Self::Calendar { base, .. } => Some(base),
             Self::Clock { base, .. } => Some(base),
+            Self::Notifications { base, .. } => Some(base),
             Self::Column { base, .. } => Some(base),
             Self::Row { base, .. } => Some(base),
         }

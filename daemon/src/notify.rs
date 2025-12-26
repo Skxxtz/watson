@@ -2,6 +2,7 @@ use std::collections::HashMap;
 use std::sync::Arc;
 
 use common::notification::Notification;
+use common::protocol::InternalMessage;
 use tokio::sync::{RwLock, broadcast};
 use zbus::interface;
 use zbus::zvariant::OwnedValue;
@@ -22,11 +23,11 @@ pub struct DaemonSettings {
 pub struct NotificationDaemon {
     id: u32,
     buffer: HashMap<u32, Notification>,
-    sender: broadcast::Sender<u32>,
+    sender: broadcast::Sender<InternalMessage>,
     pub settings: DaemonSettings,
 }
 impl NotificationDaemon {
-    pub fn new(sender: broadcast::Sender<u32>) -> Self {
+    pub fn new(sender: broadcast::Sender<InternalMessage>) -> Self {
         Self {
             id: 0,
             buffer: HashMap::new(),
@@ -76,7 +77,7 @@ impl DaemonHandle {
         daemon.buffer.insert(id, notification);
 
         // Notify that a new notification has been added
-        let _result = daemon.sender.send(id);
+        let _result = daemon.sender.send(InternalMessage::Notification(id));
 
         id
     }

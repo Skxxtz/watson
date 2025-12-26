@@ -12,6 +12,20 @@ impl SocketData {
     pub const SOCKET_ADDR: &'static str = "/tmp/watson.sock";
 }
 
+#[derive(Clone, Copy, Debug, Serialize, Deserialize)]
+pub enum BatteryState {
+    Charging,
+    Discharging,
+    Full,
+    Invalid,
+}
+
+#[derive(Clone, Copy, Debug, Serialize, Deserialize)]
+pub enum InternalMessage {
+    BatteryState(BatteryState),
+    Notification(u32),
+}
+
 #[derive(Deserialize, Serialize, Debug, Clone)]
 pub enum Response {
     Ok,
@@ -20,6 +34,7 @@ pub enum Response {
     Status { running: bool, silent: bool },
     Notification(Option<Notification>),
     Notifications(Vec<Notification>),
+    BatteryStateChange(BatteryState),
 }
 
 #[derive(Deserialize, Serialize, Debug, Clone)]

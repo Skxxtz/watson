@@ -1,11 +1,15 @@
-use common::protocol::{Request, Response, SocketData};
+use common::protocol::{BatteryState, InternalMessage, Request, Response, SocketData};
+use futures_util::StreamExt;
 use serde_json;
+use std::collections::HashMap;
 use std::sync::Arc;
 use tokio::sync::RwLockWriteGuard;
 use tokio::{
     net::{UnixListener, UnixStream},
     sync::{RwLock, broadcast},
 };
+use zbus::Connection;
+use zbus::zvariant::OwnedValue;
 
 use common::tokio::AsyncSizedMessage;
 use zbus::conn::Builder;
@@ -15,9 +19,10 @@ use crate::notify::{DaemonHandle, NotificationDaemon};
 
 #[tokio::main]
 async fn main() -> tokio::io::Result<()> {
-    let (sender, receiver) = broadcast::channel::<u32>(2);
-    let daemon = Arc::new(RwLock::new(NotificationDaemon::new(sender)));
+    let (tx, rx) = broadcast::channel::<InternalMessage>(16);
+    let daemon = Arc::new(RwLock::new(NotificationDaemon::new(tx.clone())));
 
+    let _result = tokio::spawn(battery_state_listener(tx.clone()));
     let _result = tokio::spawn(dbus_listener(daemon.clone()));
 
     // Setup Server
@@ -26,7 +31,7 @@ async fn main() -> tokio::io::Result<()> {
 
     loop {
         let (stream, _) = listener.accept().await?;
-        let rx = receiver.resubscribe();
+        let rx = rx.resubscribe();
         tokio::spawn(handle_client(stream, daemon.clone(), rx));
     }
 }
@@ -45,10 +50,47 @@ async fn dbus_listener(daemon: Arc<RwLock<NotificationDaemon>>) -> zbus::Result<
 
     Ok(())
 }
+async fn battery_state_listener(sender: broadcast::Sender<InternalMessage>) -> zbus::Result<()> {
+    // Connect to session bus
+    let conn = Connection::system().await?;
+    let proxy = zbus::Proxy::new(
+        &conn,
+        "org.freedesktop.UPower",
+        "/org/freedesktop/UPower/devices/DisplayDevice",
+        "org.freedesktop.DBus.Properties",
+    )
+    .await?;
+
+    // Create Stream
+    let mut stream = proxy.receive_signal("PropertiesChanged").await?;
+
+    // Listen to events
+    while let Some(signal) = stream.next().await {
+        let (iface, changed, _): (String, HashMap<String, OwnedValue>, Vec<String>) =
+            signal.body().deserialize()?;
+
+        if iface != "org.freedesktop.UPower.Device" {
+            continue;
+        }
+
+        if let Some(v) = changed.get("State") {
+            let state: u32 = v.try_into()?;
+            let state = match state {
+                1 => BatteryState::Charging,
+                2 => BatteryState::Discharging,
+                3 => BatteryState::Full,
+                _ => BatteryState::Invalid,
+            };
+            let _ = sender.send(InternalMessage::BatteryState(state));
+        }
+    }
+    Ok(())
+}
+
 async fn handle_client(
     mut stream: UnixStream,
     daemon: Arc<RwLock<NotificationDaemon>>,
-    mut rx: broadcast::Receiver<u32>,
+    mut rx: broadcast::Receiver<InternalMessage>,
 ) {
     loop {
         tokio::select! {
@@ -72,7 +114,7 @@ async fn handle_client(
             }
 
             msg = rx.recv() => {
-                let id = match msg {
+                let message = match msg {
                     Ok(id) => id,
                     Err(broadcast::error::RecvError::Lagged(_)) => {
                         // Client fell behind
@@ -81,8 +123,16 @@ async fn handle_client(
                     Err(_) => break // channel closed
                 };
 
-                let daemon = daemon.read().await;
-                let resp = Response::Notification(daemon.get_by_id(id).cloned());
+                let resp = match message {
+                    InternalMessage::Notification(id) => {
+                        let daemon = daemon.read().await;
+                        Response::Notification(daemon.get_by_id(id).cloned())
+                    }
+                    InternalMessage::BatteryState(state) => {
+                        Response::BatteryStateChange(state)
+                    }
+                };
+
                 let out = serde_json::to_vec(&resp).unwrap();
                 if stream.write_sized(&out).await.is_err() {
                     break;

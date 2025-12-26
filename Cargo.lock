@@ -298,6 +298,7 @@ name = "daemon"
 version = "0.1.0"
 dependencies = [
  "common",
+ "futures-util",
  "serde_json",
  "tokio",
  "zbus",

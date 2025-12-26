@@ -1,24 +1,25 @@
-use std::env;
+use std::{cell::RefCell, env, rc::Rc};
 
 use crate::{
     config::{WidgetSpec, load_config},
     connection::ClientConnection,
     ui::{
         WatsonUi,
-        widgets::{Battery, Calendar, Clock},
+        widgets::{Battery, BatteryBuilder, Calendar, Clock, NotificationCentreBuilder},
     },
 };
-use common::{config::flags::ArgParse, protocol::Request};
+use common::{config::flags::ArgParse, protocol::Response, tokio::AsyncSizedMessage};
 use gtk4::{
-    Application, Box, CssProvider,
+    Application, Box, CssProvider, DrawingArea,
     gdk::Display,
     gio::{
         ApplicationFlags,
         prelude::{ApplicationExt, ApplicationExtManual},
     },
-    glib::subclass::types::ObjectSubclassIsExt,
+    glib::{WeakRef, object::ObjectExt, subclass::types::ObjectSubclassIsExt},
     prelude::{BoxExt, GtkWindowExt, WidgetExt},
 };
+use tokio::sync::broadcast;
 
 mod config;
 mod connection;
@@ -26,49 +27,94 @@ mod ui;
 
 #[tokio::main]
 async fn main() {
-    let x = ArgParse::parse(std::env::args());
-    println!("{:?}", x);
+    let (tx, rx) = broadcast::channel::<Vec<u8>>(2);
+    let state = Rc::new(RefCell::new(UiState::new()));
+
+    let _ = ArgParse::parse(std::env::args());
+    let _ = connect(tx).await;
+
     let setup = setup();
-    setup.app.connect_activate(|app| {
-        // Load Config
-        let config = load_config().unwrap_or_default();
+    setup.app.connect_activate({
+        let state = Rc::clone(&state);
+        move |app| {
+            // Load Config
+            let config = load_config().unwrap_or_default();
 
-        // Load css
-        let provider = CssProvider::new();
-        let display = Display::default().unwrap();
-        provider.load_from_resource("/dev/skxxtz/watson/main.css");
-        gtk4::style_context_add_provider_for_display(
-            &display,
-            &provider,
-            gtk4::STYLE_PROVIDER_PRIORITY_APPLICATION,
-        );
+            // Load css
+            let provider = CssProvider::new();
+            let display = Display::default().unwrap();
+            provider.load_from_resource("/dev/skxxtz/watson/main.css");
+            gtk4::style_context_add_provider_for_display(
+                &display,
+                &provider,
+                gtk4::STYLE_PROVIDER_PRIORITY_APPLICATION,
+            );
 
-        let mut ui = WatsonUi::default();
-        let win = ui.window(app);
-        let imp = win.imp();
-        win.present();
+            let mut ui = WatsonUi::default();
+            let win = ui.window(app);
+            let imp = win.imp();
+            win.present();
 
-        for spec in config {
-            create_widgets(&imp.viewport.get(), spec);
+            for spec in config {
+                create_widgets(&imp.viewport.get(), spec, Rc::clone(&state));
+            }
+
+            gtk4::glib::spawn_future_local({
+                let mut rx = rx.resubscribe();
+                let state = Rc::clone(&state);
+                async move {
+                    while let Ok(buf) = rx.recv().await {
+                        match serde_json::from_slice::<Response>(&buf) {
+                            Ok(b) => match b {
+                                Response::BatteryStateChange(_) => {
+                                    for each in state.borrow().by_type(WatsonWidgetType::Battery) {
+                                        if let WatsonWidget::Battery(bat) = each {
+                                            bat.poll_state();
+                                            bat.queue_draw();
+                                        }
+                                    }
+                                }
+                                _ => {}
+                            },
+                            Err(_) => {}
+                        }
+                    }
+                }
+            });
         }
     });
     setup.app.run();
-    connect().await;
 }
 
-fn create_widgets(viewport: &Box, spec: WidgetSpec) {
+fn create_widgets(viewport: &Box, spec: WidgetSpec, state: Rc<RefCell<UiState>>) {
     match spec {
         WidgetSpec::Battery { .. } => {
-            let bat = Battery::new(&spec);
-            viewport.append(&bat);
+            let bat = BatteryBuilder::new(&spec).for_box(&viewport).build();
+
+            state.borrow_mut().widgets.push(WatsonWidget::Battery(bat));
         }
         WidgetSpec::Calendar { .. } => {
             let calendar = Calendar::new(&spec);
+
+            state
+                .borrow_mut()
+                .widgets
+                .push(WatsonWidget::Calendar(calendar.downgrade()));
+
             viewport.append(&calendar);
         }
         WidgetSpec::Clock { .. } => {
             let clock = Clock::new(&spec);
+
+            state
+                .borrow_mut()
+                .widgets
+                .push(WatsonWidget::Clock(clock.downgrade()));
+
             viewport.append(&clock);
+        }
+        WidgetSpec::Notifications { .. } => {
+            NotificationCentreBuilder::new().for_box(&viewport);
         }
         WidgetSpec::Column {
             base,
@@ -89,7 +135,7 @@ fn create_widgets(viewport: &Box, spec: WidgetSpec) {
             viewport.append(&col);
 
             for child in children {
-                create_widgets(&col, child);
+                create_widgets(&col, child, state.clone());
             }
         }
         WidgetSpec::Row {
@@ -110,7 +156,7 @@ fn create_widgets(viewport: &Box, spec: WidgetSpec) {
             viewport.append(&row);
 
             for child in children {
-                create_widgets(&row, child);
+                create_widgets(&row, child, state.clone());
             }
         }
     }
@@ -137,15 +183,82 @@ fn setup() -> Setup {
     Setup { app }
 }
 
-async fn connect() {
+// async fn connect() {
+//     match ClientConnection::new().await {
+//         Ok(mut c) => {
+//             if let Ok(response) = c.send(Request::PendingNotifications).await {
+//                 println!("{:?}", response);
+//             }
+//         }
+//         Err(e) => {
+//             eprintln!("{:?}", e);
+//         }
+//     }
+// }
+
+async fn connect(sender: broadcast::Sender<Vec<u8>>) {
     match ClientConnection::new().await {
-        Ok(mut c) => {
-            if let Ok(response) = c.send(Request::PendingNotifications).await {
-                println!("{:?}", response);
-            }
+        Ok(c) => {
+            let mut read_stream = c.stream;
+            tokio::spawn(async move {
+                loop {
+                    match read_stream.read_sized().await {
+                        Ok(buf) => {
+                            if buf.is_empty() {
+                                continue;
+                            }
+                            let _ = sender.send(buf);
+                        }
+                        Err(e) => {
+                            eprintln!("Connection closed: {e}");
+                            break;
+                        }
+                    }
+                }
+            });
         }
         Err(e) => {
-            eprintln!("{:?}", e);
+            eprintln!("{e}");
         }
+    };
+}
+
+#[derive(Clone, Debug)]
+pub enum WatsonWidget {
+    Battery(Battery),
+    Calendar(WeakRef<DrawingArea>),
+    Clock(WeakRef<DrawingArea>),
+}
+impl WatsonWidget {
+    pub fn widget_type(&self) -> WatsonWidgetType {
+        match self {
+            Self::Battery(_) => WatsonWidgetType::Battery,
+            Self::Calendar(_) => WatsonWidgetType::Calendar,
+            Self::Clock(_) => WatsonWidgetType::Clock,
+        }
+    }
+}
+#[derive(PartialEq, Copy, Clone, Debug)]
+pub enum WatsonWidgetType {
+    Battery,
+    Calendar,
+    Clock,
+}
+
+struct UiState {
+    widgets: Vec<WatsonWidget>,
+}
+impl UiState {
+    pub fn new() -> Self {
+        Self {
+            widgets: Vec::new(),
+        }
+    }
+    pub fn by_type(&self, t: WatsonWidgetType) -> Vec<WatsonWidget> {
+        self.widgets
+            .iter()
+            .filter(|w| w.widget_type() == t)
+            .cloned()
+            .collect()
     }
 }

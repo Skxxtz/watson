@@ -1,4 +1,11 @@
-use gtk4::{cairo::Context, gdk::FrameClock};
+use gtk4::{
+    cairo::Context,
+    gdk::FrameClock,
+    glib::{
+        WeakRef,
+        object::{ObjectExt, ObjectType},
+    },
+};
 use std::{cell::Cell, str::FromStr};
 
 pub struct CairoShapesExt;
@@ -336,5 +343,28 @@ impl AnimationState {
         self.running.set(false);
         self.last_time.set(None);
         self.direction.set(AnimationDirection::Uninitialized);
+    }
+}
+
+pub enum WidgetOption<T: ObjectType> {
+    Owned(T),
+    Borrowed(WeakRef<T>),
+}
+impl<T: ObjectType> WidgetOption<T> {
+    /// Take the owned value and replace it with a weak reference
+    pub fn take(&mut self) -> Option<T> {
+        match std::mem::replace(self, WidgetOption::Borrowed(WeakRef::default())) {
+            WidgetOption::Owned(obj) => {
+                *self = WidgetOption::Borrowed(obj.downgrade());
+                Some(obj)
+            }
+            WidgetOption::Borrowed(weak) => weak.upgrade(),
+        }
+    }
+    pub fn weak(&self) -> WeakRef<T> {
+        match self {
+            Self::Owned(obj) => obj.downgrade(),
+            Self::Borrowed(b) => b.clone(),
+        }
     }
 }

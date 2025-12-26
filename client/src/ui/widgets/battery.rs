@@ -2,18 +2,37 @@ use std::{cell::Cell, rc::Rc, str::FromStr};
 
 use crate::{
     config::WidgetSpec,
-    ui::widgets::utils::{CairoShapesExt, Rgba},
+    ui::widgets::utils::{CairoShapesExt, Rgba, WidgetOption},
 };
 use gtk4::{
-    DrawingArea,
+    Box, DrawingArea,
     cairo::{Context, LineCap},
-    glib::object::ObjectExt,
-    prelude::{DrawingAreaExtManual, WidgetExt},
+    glib::{WeakRef, object::ObjectExt},
+    prelude::{BoxExt, DrawingAreaExtManual, WidgetExt},
 };
 
-pub struct Battery;
+#[derive(Clone, Debug)]
+pub struct Battery {
+    pub weak: WeakRef<DrawingArea>,
+    pub status: Rc<Cell<BatteryStatus>>,
+}
 impl Battery {
-    pub fn new(specs: &WidgetSpec) -> DrawingArea {
+    pub fn poll_state(&self) {
+        self.status.set(BatteryStatus::poll());
+    }
+    pub fn queue_draw(&self) {
+        if let Some(strong) = self.weak.upgrade() {
+            strong.queue_draw();
+        }
+    }
+}
+
+pub struct BatteryBuilder {
+    ui: WidgetOption<DrawingArea>,
+    status: Rc<Cell<BatteryStatus>>,
+}
+impl BatteryBuilder {
+    pub fn new(specs: &WidgetSpec) -> Self {
         let specs = Rc::new(specs.clone());
 
         let bat_area = DrawingArea::builder()
@@ -40,7 +59,7 @@ impl Battery {
             let specs = Rc::clone(&specs);
             let status = Rc::clone(&status);
             move |area, ctx, width, height| {
-                Self::draw(area, ctx, width, height, &specs, Rc::clone(&status));
+                Battery::draw(area, ctx, width, height, &specs, Rc::clone(&status));
             }
         });
 
@@ -56,8 +75,27 @@ impl Battery {
             }
         });
 
-        bat_area
+        Self {
+            ui: WidgetOption::Owned(bat_area),
+            status,
+        }
     }
+    pub fn for_box(mut self, container: &Box) -> Self {
+        if let Some(wid) = self.ui.take() {
+            container.append(&wid)
+        }
+        self
+    }
+    pub fn build(self) -> Battery {
+        let weak = self.ui.weak();
+        Battery {
+            weak,
+            status: self.status,
+        }
+    }
+}
+
+impl Battery {
     fn draw(
         _area: &DrawingArea,
         ctx: &Context,
@@ -99,7 +137,6 @@ impl Battery {
                 center: width as f64 / 2.0 + padding,
                 height,
                 line_width: height * 0.1,
-                padding,
             }
         };
 
@@ -202,10 +239,9 @@ struct BatteryContext {
     center: f64,
     height: f64,
     line_width: f64,
-    padding: f64,
 }
 
-#[derive(Copy, Clone)]
+#[derive(Copy, Clone, Debug)]
 pub enum BatteryStatus {
     Discharging(u32),
     Full(u32),

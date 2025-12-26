@@ -1,0 +1,8 @@
+<interface>
+  <template class="NotificationCollection" parent="GtkBox">
+      <child>
+          <object class="GtkListBox" id="list">
+          </object>
+      </child>
+  </template>
+</interface>

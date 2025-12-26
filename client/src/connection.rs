@@ -3,8 +3,10 @@ use common::tokio::AsyncSizedMessage;
 use tokio::net::UnixStream;
 
 pub struct ClientConnection {
-    stream: UnixStream,
+    pub stream: UnixStream,
 }
+
+#[allow(dead_code)]
 impl ClientConnection {
     pub async fn new() -> std::io::Result<Self> {
         let stream = UnixStream::connect(SocketData::SOCKET_ADDR).await?;
