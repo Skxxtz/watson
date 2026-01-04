@@ -1,5 +1,6 @@
 // src/ui/templates/notification_obj.rs
 
+use std::cell::RefCell;
 use std::rc::Rc;
 
 use common::notification::Notification;
@@ -7,13 +8,13 @@ use gtk4::glib::subclass::prelude::*;
 use gtk4::glib::{self, Object};
 
 mod imp {
-    use std::cell::RefCell;
+    use std::rc::Weak;
 
     use super::*;
 
     #[derive(Default)]
     pub struct NotificationObjImp {
-        pub notification: Rc<RefCell<Notification>>,
+        pub notification: RefCell<Weak<Notification>>,
     }
 
     #[glib::object_subclass]
@@ -32,8 +33,16 @@ glib::wrapper! {
 }
 
 impl NotificationObj {
-    pub fn new() -> Self {
+    pub fn new(notification: Rc<Notification>) -> Self {
         let obj: Self = Object::new();
+        let imp = obj.imp();
+
+        imp.notification.replace(Rc::downgrade(&notification));
+
         obj
+    }
+
+    pub fn notification(&self) -> Option<Rc<Notification>> {
+        self.imp().notification.borrow().upgrade()
     }
 }

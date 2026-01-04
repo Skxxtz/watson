@@ -7,4 +7,4 @@ mod utils;
 pub use battery::{Battery, BatteryBuilder};
 pub use calendar::Calendar;
 pub use clock::{Clock, HandStyle};
-pub use notifications::NotificationCentreBuilder;
+pub use notifications::{NotificationCentre, NotificationCentreBuilder};

@@ -1,13 +1,18 @@
 <interface>
-  <template class="MainWindow" parent="GtkApplicationWindow">
-    <child>
-      <object class="GtkBox" id="viewport">
-        <property name="orientation">vertical</property>
-        <property name="spacing">0</property>
-        <property name="vexpand">true</property>
-        <property name="hexpand">true</property>
-
-      </object>
-    </child>
-  </template>
+    <template class="MainWindow" parent="GtkApplicationWindow">
+        <child>
+            <object class="GtkScrolledWindow" id="viewport-scroll">
+                <property name="min-content-width">400</property>
+                <property name="min-content-height">1000</property>
+                <child>
+                    <object class="GtkBox" id="viewport">
+                        <property name="orientation">vertical</property>
+                        <property name="spacing">0</property>
+                        <property name="vexpand">true</property>
+                        <property name="hexpand">true</property>
+                    </object>
+                </child>
+            </object>
+        </child>
+    </template>
 </interface>

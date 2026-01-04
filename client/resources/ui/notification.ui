@@ -1,0 +1,49 @@
+<interface>
+    <template class="Notification" parent="GtkBox">
+        <property name="orientation">vertical</property>
+        <property name="spacing">6</property>
+        <property name="hexpand">true</property>
+        <property name="halign">fill</property>
+
+        <child>
+            <object class="GtkBox" id="content">
+                <property name="orientation">vertical</property>
+                <property name="spacing">4</property>
+                <property name="hexpand">true</property>
+                <property name="halign">fill</property>
+
+                <child>
+                    <object class="GtkBox" id="title_box">
+                        <property name="hexpand">true</property>
+                        <property name="spacing">10</property>
+                        <child>
+                            <object class="GtkImage" id="app_icon">
+                            </object>
+                        </child>
+                        <child>
+                            <object class="GtkLabel" id="title">
+                                <style>
+                                    <class name="notification-title"/>
+                                </style>
+                                <property name="label">Test</property>
+                            </object>
+                        </child>
+                    </object>
+                </child>
+
+                <child>
+                    <object class="GtkLabel" id="body">
+                        <style>
+                            <class name="notification-body"/>
+                            <class name="text-body"/>
+                        </style>
+                        <property name="label">Lorem ipsum dolor sit amet, consectetur adipising elit, sed do eiusmod tempor incididunt ut labore et dolore magna aliqua.</property>
+                        <property name="wrap">true</property>
+                        <property name="wrap-mode">word</property>
+                    </object>
+                </child>
+
+            </object>
+        </child>
+    </template>
+</interface>

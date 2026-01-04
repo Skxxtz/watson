@@ -63,6 +63,11 @@ impl DaemonHandle {
         daemon.id += 1;
         let id = daemon.id;
 
+        let urgency = hints
+            .get("urgency")
+            .and_then(|v| v.downcast_ref::<u8>().ok())
+            .unwrap_or(1);
+
         let notification = Notification {
             id,
             app_name,
@@ -73,6 +78,7 @@ impl DaemonHandle {
             actions,
             hints,
             expire_timeout,
+            urgency: urgency.into(),
         };
         daemon.buffer.insert(id, notification);
 

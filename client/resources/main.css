@@ -32,3 +32,53 @@ window {
     padding: 5px;
 }
 
+/* ********************************************* */
+/* *************Notifications******************* */
+/* ********************************************* */
+.notification,
+.notification.prio-low,
+.notification.prio-normal {
+    --notification-background: #181818; 
+    --notification-color: #f8f8f8; 
+    --notification-border: #333333;
+    --notification-muted: #BBBBBB; 
+}
+.notification.prio-critical {
+    --notification-background: #3A1E1E;
+    --notification-color: hsla(0, 57%, 50.8%, 1.0);
+    --notification-border: var(--notification-color);
+    --notification-muted: hsla(0, 57%, 50.8%, 0.6);
+}
+
+.notification {
+    transition: box-shadow 0.2s ease;
+    padding: 10px;
+    background: var(--notification-background);
+    border: 1px solid var(--notification-border);
+    border-radius: 10px;
+    min-height: 55px;
+    color: var(--notification-color);
+}
+
+.notification-title {
+    font-weight: 500;
+}
+
+.notification .close-icon,
+.notification-body {
+    color: var(--notification-muted);
+}
+
+.notification:hover {
+    transition: 0.2s ease;
+    box-shadow: inset 0px 0px 0px 0.5px rgba(55, 55, 55, 1);
+}
+
+.notification_centre,
+.notification_centre list,
+.notification_centre list > row{
+    background: transparent;
+    background-color: transparent;
+    box-shadow: none;
+    border: none;
+}

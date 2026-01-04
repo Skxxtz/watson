@@ -76,7 +76,10 @@ impl BatteryBuilder {
             let specs = Rc::clone(&specs);
             let status = Rc::clone(&status);
             move |area, ctx, width, height| {
-                let tooltip = status.get().to_percentage().map(|s| format!("{}%", s * 100.0).to_string());
+                let tooltip = status
+                    .get()
+                    .to_percentage()
+                    .map(|s| format!("{}%", s * 100.0).to_string());
                 area.set_tooltip_markup(tooltip.as_deref());
                 Battery::draw(area, ctx, width, height, &specs, Rc::clone(&status));
             }

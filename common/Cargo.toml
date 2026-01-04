@@ -4,7 +4,7 @@ version = "0.1.0"
 edition = "2024"
 
 [dependencies]
-serde = {version = "1.0.228", default-features = false, features = ["derive"]}
+serde = {version = "1.0.228", default-features = false, features = ["derive", "rc"]}
 tokio = {version = "1.48.0", default-features = false, features = ["net", "rt-multi-thread", "macros", "io-util"]}
 zbus = {version = "5.12.0", default-features = false, features = ["tokio"]}
 ical = "0.11.0"

@@ -5,10 +5,15 @@ use crate::{
     connection::ClientConnection,
     ui::{
         WatsonUi,
-        widgets::{Battery, BatteryBuilder, Calendar, Clock, NotificationCentreBuilder},
+        widgets::{
+            Battery, BatteryBuilder, Calendar, Clock, NotificationCentre, NotificationCentreBuilder,
+        },
     },
 };
-use common::{config::flags::ArgParse, protocol::Response, tokio::AsyncSizedMessage};
+use common::{
+    config::flags::ArgParse, notification::Notification, protocol::Response,
+    tokio::AsyncSizedMessage,
+};
 use gtk4::{
     Application, Box, CssProvider, DrawingArea,
     gdk::Display,
@@ -32,6 +37,8 @@ async fn main() {
 
     let _ = ArgParse::parse(std::env::args());
     let _ = connect(tx).await;
+
+    let notification_store = Rc::new(RefCell::new(NotificationStore::new()));
 
     let setup = setup();
     setup.app.connect_activate({
@@ -63,6 +70,7 @@ async fn main() {
             gtk4::glib::spawn_future_local({
                 let mut rx = rx.resubscribe();
                 let state = Rc::clone(&state);
+                let store = Rc::clone(&notification_store);
                 async move {
                     while let Ok(buf) = rx.recv().await {
                         match serde_json::from_slice::<Response>(&buf) {
@@ -72,6 +80,19 @@ async fn main() {
                                         bat.update_state(s);
                                         bat.queue_draw();
                                     });
+                                }
+                                Response::Notification(Some(notification)) => {
+                                    let rc = Rc::new(notification);
+                                    state.borrow().notification_centres().for_each(|c| {
+                                        c.insert(rc.clone());
+                                    });
+                                    store.borrow_mut().notifications.push(rc);
+                                }
+                                Response::Notifications(s) => {
+                                    store
+                                        .borrow_mut()
+                                        .notifications
+                                        .extend(s.into_iter().map(|v| Rc::new(v)));
                                 }
                                 _ => {}
                             },
@@ -98,7 +119,7 @@ fn create_widgets(viewport: &Box, spec: WidgetSpec, state: Rc<RefCell<UiState>>)
             state
                 .borrow_mut()
                 .widgets
-                .push(WatsonWidget::Calendar(calendar.downgrade()));
+                .push(WatsonWidget::Calendar(ObjectExt::downgrade(&calendar)));
 
             viewport.append(&calendar);
         }
@@ -108,12 +129,17 @@ fn create_widgets(viewport: &Box, spec: WidgetSpec, state: Rc<RefCell<UiState>>)
             state
                 .borrow_mut()
                 .widgets
-                .push(WatsonWidget::Clock(clock.downgrade()));
+                .push(WatsonWidget::Clock(ObjectExt::downgrade(&clock)));
 
             viewport.append(&clock);
         }
         WidgetSpec::Notifications { .. } => {
-            NotificationCentreBuilder::new().for_box(&viewport);
+            let notification_centre = NotificationCentreBuilder::new().for_box(&viewport).build();
+
+            state
+                .borrow_mut()
+                .widgets
+                .push(WatsonWidget::NoticationCentre(notification_centre));
         }
         WidgetSpec::Column {
             base,
@@ -214,6 +240,7 @@ pub enum WatsonWidget {
     Battery(Battery),
     Calendar(WeakRef<DrawingArea>),
     Clock(WeakRef<DrawingArea>),
+    NoticationCentre(NotificationCentre),
 }
 impl WatsonWidget {
     pub fn widget_type(&self) -> WatsonWidgetType {
@@ -221,6 +248,7 @@ impl WatsonWidget {
             Self::Battery(_) => WatsonWidgetType::Battery,
             Self::Calendar(_) => WatsonWidgetType::Calendar,
             Self::Clock(_) => WatsonWidgetType::Clock,
+            Self::NoticationCentre(_) => WatsonWidgetType::NotificationCentre,
         }
     }
 }
@@ -229,6 +257,7 @@ pub enum WatsonWidgetType {
     Battery,
     Calendar,
     Clock,
+    NotificationCentre,
 }
 
 struct UiState {
@@ -267,5 +296,25 @@ impl UiState {
                 None
             }
         })
+    }
+    pub fn notification_centres(&self) -> impl Iterator<Item = &NotificationCentre> {
+        self.widgets.iter().filter_map(|w| {
+            if let WatsonWidget::NoticationCentre(c) = w {
+                Some(c)
+            } else {
+                None
+            }
+        })
+    }
+}
+
+struct NotificationStore {
+    notifications: Vec<Rc<Notification>>,
+}
+impl NotificationStore {
+    pub fn new() -> Self {
+        Self {
+            notifications: Vec::new(),
+        }
     }
 }
