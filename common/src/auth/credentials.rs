@@ -87,6 +87,7 @@ pub enum CredentialDataSerde {
         username: CredentialSecretSerde,
         secret: CredentialSecretSerde,
     },
+    Empty,
 }
 impl From<CredentialData> for CredentialDataSerde {
     fn from(value: CredentialData) -> Self {
@@ -108,6 +109,7 @@ impl From<CredentialData> for CredentialDataSerde {
                 refresh_token: (&refresh_token).into(),
                 expires_at,
             },
+            CredentialData::Empty => Self::Empty,
         }
     }
 }
@@ -151,6 +153,33 @@ impl CredentialSecret {
         match self {
             Self::Decrypted(_) => false,
             Self::Encrypted { .. } => true,
+        }
+    }
+    pub fn len(&self) -> usize {
+        match self {
+            Self::Decrypted(t) => t.len(),
+            Self::Encrypted { .. } => 0,
+        }
+    }
+    pub fn take(&self) -> String {
+        match self {
+            Self::Decrypted(s) => s.clone(),
+            Self::Encrypted { .. } => "<encrypted>".to_string(),
+        }
+    }
+    pub fn push(&mut self, c: char) {
+        if let Self::Decrypted(s) = self {
+            s.push(c);
+        }
+    }
+    pub fn pop(&mut self) {
+        if let Self::Decrypted(s) = self {
+            s.pop();
+        }
+    }
+    pub fn push_str(&mut self, str: &str) {
+        if let Self::Decrypted(s) = self {
+            s.push_str(str);
         }
     }
 }
@@ -225,6 +254,7 @@ pub enum CredentialData {
         username: CredentialSecret,
         secret: CredentialSecret,
     },
+    Empty,
 }
 impl TryFrom<CredentialDataSerde> for CredentialData {
     type Error = WatsonError;
@@ -248,6 +278,7 @@ impl TryFrom<CredentialDataSerde> for CredentialData {
                 refresh_token: refresh_token.try_into()?,
                 expires_at,
             }),
+            CredentialDataSerde::Empty => Ok(Self::Empty),
         }
     }
 }
@@ -298,6 +329,7 @@ impl Credential {
                 decrypt_field(access_token)?;
                 decrypt_field(refresh_token)?;
             }
+            CredentialData::Empty => {}
         };
 
         Ok(())
@@ -335,6 +367,7 @@ impl Credential {
                 encrypt_field(access_token)?;
                 encrypt_field(refresh_token)?;
             }
+            CredentialData::Empty => {}
         }
 
         Ok(())

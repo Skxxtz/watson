@@ -146,20 +146,23 @@ enum AccountField {
     Username,
     Password,
     Label,
+    OpenBrowser,
     Save,
 }
 
 #[derive(Debug, Clone, Copy, Deserialize, Serialize)]
 pub enum CredentialService {
     Icloud,
+    Google,
     None,
 }
 impl CredentialService {
     const LEN: usize = 2;
-    const ALL: [Self; 1] = [Self::Icloud];
+    const ALL: [Self; 2] = [Self::Icloud, Self::Google];
     fn itos(index: usize) -> Self {
         match index {
             0 => Self::Icloud,
+            1 => Self::Google,
             _ => Self::None,
         }
     }
@@ -176,6 +179,7 @@ impl Display for CredentialService {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         let st = match self {
             Self::Icloud => "ICloud",
+            Self::Google => "Google",
             Self::None => "",
         };
         write!(f, "{}", st)
@@ -185,9 +189,8 @@ impl Display for CredentialService {
 struct NewAccountState {
     field: AccountField,
     service: CredentialService,
-    username: String,
-    secret: String,
-    label: String,
+    data: CredentialData,
+    label: CredentialSecret,
 }
 struct EditState {
     field: AccountField,
@@ -211,9 +214,8 @@ impl NewAccountState {
         Self {
             service: CredentialService::None,
             field: AccountField::Service,
-            username: String::new(),
-            secret: String::new(),
-            label: String::new(),
+            data: CredentialData::Empty,
+            label: CredentialSecret::Decrypted(String::new()),
         }
     }
 }
@@ -282,35 +284,52 @@ fn render_new_account(s: &NewAccountState) {
         s.service
     );
 
-    println!(
-        "{} Username: {}",
-        if matches!(s.field, AccountField::Username) {
-            ">"
-        } else {
-            " "
-        },
-        s.username
-    );
+    match &s.data {
+        CredentialData::Password { username, secret } => {
+            println!(
+                "{} Username: {}",
+                if matches!(s.field, AccountField::Username) {
+                    ">"
+                } else {
+                    " "
+                },
+                username
+            );
 
-    println!(
-        "{} Password: {}",
-        if matches!(s.field, AccountField::Password) {
-            ">"
-        } else {
-            " "
-        },
-        "*".repeat(s.secret.len())
-    );
+            println!(
+                "{} Password: {}",
+                if matches!(s.field, AccountField::Password) {
+                    ">"
+                } else {
+                    " "
+                },
+                "*".repeat(secret.len())
+            );
+        }
+        CredentialData::OAuth { .. } => {
+            println!(
+                "{} Proceed in Broser →",
+                if matches!(s.field, AccountField::OpenBrowser) {
+                    ">"
+                } else {
+                    " "
+                }
+            );
+        }
+        CredentialData::Empty => {}
+    }
 
-    println!(
-        "{} Label: {}",
-        if matches!(s.field, AccountField::Label) {
-            ">"
-        } else {
-            " "
-        },
-        s.label
-    );
+    if !matches!(s.service, CredentialService::None) {
+        println!(
+            "{} Label: {}",
+            if matches!(s.field, AccountField::Label) {
+                ">"
+            } else {
+                " "
+            },
+            s.label
+        );
+    }
 
     match s.field {
         AccountField::Service if s.service.is_empty() => {
@@ -327,11 +346,18 @@ fn update_new_account(
     input: Input,
     manager: &mut CredentialManager,
 ) -> Result<Option<UiState>, WatsonError> {
-    let current = match s.field {
-        AccountField::Username => Some(&mut s.username),
-        AccountField::Password => Some(&mut s.secret),
-        AccountField::Label => Some(&mut s.label),
-        _ => None,
+    let current = match &mut s.data {
+        CredentialData::Password { username, secret } => match s.field {
+            AccountField::Username => Some(username),
+            AccountField::Password => Some(secret),
+            AccountField::Label => Some(&mut s.label),
+            _ => None,
+        },
+        CredentialData::OAuth { .. } => match s.field {
+            AccountField::Label => Some(&mut s.label),
+            _ => None,
+        },
+        CredentialData::Empty => None,
     };
 
     match input {
@@ -345,16 +371,22 @@ fn update_new_account(
             current.map(|f| f.pop());
         }
         Input::Down | Input::Tab if matches!(s.field, AccountField::Service) => {
-            if !matches!(s.service, CredentialService::None) {
-                s.field = AccountField::Username;
-            }
+            s.field = match s.service {
+                CredentialService::Icloud => AccountField::Username,
+                CredentialService::Google => AccountField::OpenBrowser,
+                _ => AccountField::Service,
+            };
         }
         Input::Up => {
             s.field = match s.field {
                 AccountField::Service => AccountField::Service,
                 AccountField::Username => AccountField::Service,
                 AccountField::Password => AccountField::Username,
-                AccountField::Label => AccountField::Password,
+                AccountField::Label => match s.service {
+                    CredentialService::Google => AccountField::OpenBrowser,
+                    CredentialService::Icloud => AccountField::Password,
+                    _ => AccountField::Service,
+                },
                 _ => AccountField::Service,
             };
         }
@@ -371,13 +403,10 @@ fn update_new_account(
                 }
                 AccountField::Username => AccountField::Password,
                 AccountField::Password => AccountField::Label,
+                AccountField::OpenBrowser => AccountField::Label,
                 AccountField::Label => {
                     // Save to credential manager
-                    let data = CredentialData::Password {
-                        username: CredentialSecret::Decrypted(s.username.clone()),
-                        secret: CredentialSecret::Decrypted(s.secret.clone()),
-                    };
-                    let cred = Credential::new(data, s.service, s.label.clone());
+                    let cred = Credential::new(s.data.clone(), s.service, s.label.take());
                     manager.insert(cred);
                     manager.save()?;
 
@@ -422,13 +451,30 @@ fn update_service_selection(
                         }),
                     }
                 }
-                ServiceReturnTarget::NewAccount => UiState::NewAccount(NewAccountState {
-                    field: AccountField::Service,
-                    service: CredentialService::itos(state.selected),
-                    username: String::new(),
-                    secret: String::new(),
-                    label: String::new(),
-                }),
+                ServiceReturnTarget::NewAccount => {
+                    let service = CredentialService::itos(state.selected);
+                    let data = match &service {
+                        CredentialService::Google => CredentialData::OAuth {
+                            client_id: CredentialSecret::Decrypted(String::new()),
+                            client_secret: CredentialSecret::Decrypted(String::new()),
+                            access_token: CredentialSecret::Decrypted(String::new()),
+                            refresh_token: CredentialSecret::Decrypted(String::new()),
+                            expires_at: 0,
+                        },
+                        CredentialService::Icloud => CredentialData::Password {
+                            username: CredentialSecret::Decrypted(String::new()),
+                            secret: CredentialSecret::Decrypted(String::new()),
+                        },
+                        CredentialService::None => CredentialData::Empty,
+                    };
+
+                    UiState::NewAccount(NewAccountState {
+                        field: AccountField::Service,
+                        service,
+                        data,
+                        label: CredentialSecret::Decrypted(String::new()),
+                    })
+                }
             });
         }
         _ => {}
@@ -464,7 +510,16 @@ fn render_manage(s: &ManageState, creds: &CredentialManager) {
                     }
                 }
             }
-            CredentialData::OAuth { .. } => {}
+            CredentialData::OAuth { .. } => {
+                if i == s.selected {
+                    println!("> {}", c.label);
+                } else {
+                    println!("  {}", c.label);
+                }
+            }
+            CredentialData::Empty => {
+                println!("Debug: Empty account")
+            }
         }
     }
 
@@ -672,6 +727,7 @@ fn update_edit(
                 AccountField::Password => AccountField::Username,
                 AccountField::Label => AccountField::Password,
                 AccountField::Save => AccountField::Label,
+                AccountField::OpenBrowser => AccountField::Service,
             };
         }
         Input::Enter | Input::Tab | Input::Down => {
@@ -692,6 +748,7 @@ fn update_edit(
                 AccountField::Username => AccountField::Password,
                 AccountField::Password => AccountField::Label,
                 AccountField::Label => AccountField::Save,
+                AccountField::OpenBrowser => AccountField::OpenBrowser,
                 AccountField::Save => {
                     // Important: return the initial secret if it wasnt changed
                     match &mut cred.data {

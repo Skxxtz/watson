@@ -90,6 +90,12 @@ impl PropfindInterface {
                 .send()
                 .await
                 .map_err(|e| watson_err!(WatsonErrorKind::HttpGetRequest, e.to_string()))?,
+            CredentialData::Empty => {
+                return Err(watson_err!(
+                    WatsonErrorKind::UndefinedAttribute,
+                    "Undefined credential data."
+                ));
+            }
         };
 
         let text = resp
