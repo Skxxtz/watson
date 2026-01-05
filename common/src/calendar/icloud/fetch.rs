@@ -13,7 +13,7 @@ use reqwest::{
 };
 
 use crate::{
-    auth::{Credential, CredentialSecret},
+    auth::{Credential, CredentialData},
     calendar::{
         icloud::protocol::PropfindRequest,
         utils::{
@@ -37,17 +37,12 @@ use crate::{
 pub struct PropfindInterface {
     client: Client,
     headers: HeaderMap,
-    username: CredentialSecret,
-    password: CredentialSecret,
+    data: CredentialData,
     principal: Option<String>,
 }
 impl PropfindInterface {
     pub fn new(credential: Credential) -> Self {
-        let Credential {
-            username,
-            secret: password,
-            ..
-        } = credential;
+        let Credential { data, .. } = credential;
 
         let client = Client::new();
 
@@ -60,8 +55,7 @@ impl PropfindInterface {
         Self {
             client,
             headers,
-            username,
-            password,
+            data,
             principal: None,
         }
     }
@@ -71,18 +65,32 @@ impl PropfindInterface {
         headers.insert("Depth", HeaderValue::from_static(params.depth));
         let body = request.body();
 
-        let resp = self
-            .client
-            .request(
-                reqwest::Method::from_bytes(params.method).unwrap(),
-                params.url,
-            )
-            .basic_auth(&self.username, Some(&self.password))
-            .headers(headers)
-            .body(body)
-            .send()
-            .await
-            .map_err(|e| watson_err!(WatsonErrorKind::HttpGetRequest, e.to_string()))?;
+        let resp = match &self.data {
+            CredentialData::Password { username, secret } => self
+                .client
+                .request(
+                    reqwest::Method::from_bytes(params.method).unwrap(),
+                    params.url,
+                )
+                .basic_auth(&username, Some(&secret))
+                .headers(headers)
+                .body(body)
+                .send()
+                .await
+                .map_err(|e| watson_err!(WatsonErrorKind::HttpGetRequest, e.to_string()))?,
+            CredentialData::OAuth { access_token, .. } => self
+                .client
+                .request(
+                    reqwest::Method::from_bytes(params.method).unwrap(),
+                    params.url,
+                )
+                .bearer_auth(access_token)
+                .headers(headers)
+                .body(body)
+                .send()
+                .await
+                .map_err(|e| watson_err!(WatsonErrorKind::HttpGetRequest, e.to_string()))?,
+        };
 
         let text = resp
             .text()

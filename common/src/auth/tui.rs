@@ -6,7 +6,7 @@ use std::{
 use serde::{Deserialize, Serialize};
 
 use crate::{
-    auth::{Credential, CredentialManager, credentials::CredentialSecret},
+    auth::{Credential, CredentialData, CredentialManager, credentials::CredentialSecret},
     errors::WatsonError,
 };
 
@@ -373,12 +373,11 @@ fn update_new_account(
                 AccountField::Password => AccountField::Label,
                 AccountField::Label => {
                     // Save to credential manager
-                    let cred = Credential::new(
-                        s.username.clone(),
-                        s.secret.clone(),
-                        s.service,
-                        s.label.clone(),
-                    );
+                    let data = CredentialData::Password {
+                        username: CredentialSecret::Decrypted(s.username.clone()),
+                        secret: CredentialSecret::Decrypted(s.secret.clone()),
+                    };
+                    let cred = Credential::new(data, s.service, s.label.clone());
                     manager.insert(cred);
                     manager.save()?;
 
@@ -408,16 +407,20 @@ fn update_service_selection(
             return Some(match state.return_target {
                 ServiceReturnTarget::EditAccount => {
                     let current = &mut manager.credentials[state.cred_index.unwrap()];
-                    println!(
-                        "{} - {} - {}",
-                        current.secret, current.username, current.label
-                    );
-                    current.service = CredentialService::itos(state.selected);
-                    UiState::Edit(EditState {
-                        field: AccountField::Service,
-                        cred: state.cred_index.unwrap(),
-                        initial_secret: std::mem::take(&mut current.secret),
-                    })
+                    match &mut current.data {
+                        CredentialData::Password { username, secret } => {
+                            println!("{} - {} - {}", secret, username, current.label);
+                            current.service = CredentialService::itos(state.selected);
+                            UiState::Edit(EditState {
+                                field: AccountField::Service,
+                                cred: state.cred_index.unwrap(),
+                                initial_secret: std::mem::take(secret),
+                            })
+                        }
+                        _ => UiState::ManageAccounts(ManageState {
+                            selected: state.cred_index.unwrap_or(0),
+                        }),
+                    }
                 }
                 ServiceReturnTarget::NewAccount => UiState::NewAccount(NewAccountState {
                     field: AccountField::Service,
@@ -451,12 +454,17 @@ fn render_manage(s: &ManageState, creds: &CredentialManager) {
     println!("Accounts:\n");
 
     for (i, c) in creds.credentials.iter().enumerate() {
-        if let CredentialSecret::Decrypted(ref username) = c.username {
-            if i == s.selected {
-                println!("> {} ({})", c.label, username);
-            } else {
-                println!("  {} ({})", c.label, username);
+        match &c.data {
+            CredentialData::Password { username, .. } => {
+                if let CredentialSecret::Decrypted(username) = username {
+                    if i == s.selected {
+                        println!("> {} ({})", c.label, username);
+                    } else {
+                        println!("  {} ({})", c.label, username);
+                    }
+                }
             }
+            CredentialData::OAuth { .. } => {}
         }
     }
 
@@ -497,12 +505,17 @@ fn update_manage_options_menu(
             return Ok(Some(match state.selected {
                 0 => {
                     let current = &mut manager.credentials[state.cred_index];
-                    let edit_state = EditState {
-                        field: AccountField::Service,
-                        cred: state.cred_index,
-                        initial_secret: std::mem::take(&mut current.secret),
-                    };
-                    UiState::Edit(edit_state)
+                    match &mut current.data {
+                        CredentialData::Password { secret, .. } => {
+                            let edit_state = EditState {
+                                field: AccountField::Service,
+                                cred: state.cred_index,
+                                initial_secret: std::mem::take(secret),
+                            };
+                            UiState::Edit(edit_state)
+                        }
+                        _ => return Ok(None),
+                    }
                 }
                 1 => {
                     // Remove entry from credential manager
@@ -538,6 +551,9 @@ fn render_manage_options_menu(selected: usize) {
 //
 fn render_edit(s: &EditState, manager: &mut CredentialManager) {
     let cred = &mut manager.credentials[s.cred];
+    let CredentialData::Password { username, secret } = &cred.data else {
+        return;
+    };
     clear();
     println!("Edit Account:\n");
 
@@ -558,10 +574,10 @@ fn render_edit(s: &EditState, manager: &mut CredentialManager) {
         } else {
             " "
         },
-        cred.username
+        username
     );
 
-    if let CredentialSecret::Decrypted(ref secret) = cred.secret {
+    if let CredentialSecret::Decrypted(secret) = secret {
         println!(
             "{} Password: {}",
             if matches!(s.field, AccountField::Password) {
@@ -608,9 +624,12 @@ fn update_edit(
     manager: &mut CredentialManager,
 ) -> Result<Option<UiState>, WatsonError> {
     let cred = &mut manager.credentials[s.cred];
-    let current = match s.field {
-        AccountField::Username => Some(&mut cred.username),
-        AccountField::Password => Some(&mut cred.secret),
+    let current = match &mut cred.data {
+        CredentialData::Password { username, secret } => match s.field {
+            AccountField::Username => Some(username),
+            AccountField::Password => Some(secret),
+            _ => None,
+        },
         _ => None,
     };
     let current_text = if current.is_none() {
@@ -658,7 +677,12 @@ fn update_edit(
         Input::Enter | Input::Tab | Input::Down => {
             s.field = match s.field {
                 AccountField::Service => {
-                    cred.secret = std::mem::take(&mut s.initial_secret);
+                    match &mut cred.data {
+                        CredentialData::Password { secret, .. } => {
+                            *secret = std::mem::take(&mut s.initial_secret);
+                        }
+                        _ => {}
+                    }
                     return Ok(Some(UiState::ServiceEdit(ServiceSelectState {
                         cred_index: Some(s.cred),
                         return_target: ServiceReturnTarget::EditAccount,
@@ -670,8 +694,13 @@ fn update_edit(
                 AccountField::Label => AccountField::Save,
                 AccountField::Save => {
                     // Important: return the initial secret if it wasnt changed
-                    if cred.secret.is_empty() {
-                        cred.secret = std::mem::take(&mut s.initial_secret);
+                    match &mut cred.data {
+                        CredentialData::Password { secret, .. } => {
+                            if secret.is_empty() {
+                                *secret = std::mem::take(&mut s.initial_secret);
+                            }
+                        }
+                        _ => {}
                     }
 
                     // Save
@@ -682,7 +711,12 @@ fn update_edit(
             };
         }
         Input::Esc => {
-            cred.secret = std::mem::take(&mut s.initial_secret);
+            match &mut cred.data {
+                CredentialData::Password { secret, .. } => {
+                    *secret = std::mem::take(&mut s.initial_secret);
+                }
+                _ => {}
+            }
             return Ok(Some(UiState::ManageAccounts(ManageState { selected: 0 })));
         }
     }

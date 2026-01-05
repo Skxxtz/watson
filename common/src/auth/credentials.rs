@@ -75,11 +75,48 @@ impl From<&CredentialSecret> for CredentialSecretSerde {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+pub enum CredentialDataSerde {
+    OAuth {
+        client_id: CredentialSecretSerde,
+        client_secret: CredentialSecretSerde,
+        access_token: CredentialSecretSerde,
+        refresh_token: CredentialSecretSerde,
+        expires_at: i64,
+    },
+    Password {
+        username: CredentialSecretSerde,
+        secret: CredentialSecretSerde,
+    },
+}
+impl From<CredentialData> for CredentialDataSerde {
+    fn from(value: CredentialData) -> Self {
+        match value {
+            CredentialData::Password { username, secret } => Self::Password {
+                username: (&username).into(),
+                secret: (&secret).into(),
+            },
+            CredentialData::OAuth {
+                client_id,
+                client_secret,
+                access_token,
+                refresh_token,
+                expires_at,
+            } => Self::OAuth {
+                client_id: (&client_id).into(),
+                client_secret: (&client_secret).into(),
+                access_token: (&access_token).into(),
+                refresh_token: (&refresh_token).into(),
+                expires_at,
+            },
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct CredentialSerde {
     pub id: String,
     pub service: CredentialService,
-    pub username: CredentialSecretSerde,
-    pub secret: CredentialSecretSerde,
+    pub data: CredentialDataSerde,
     pub label: String,
 }
 
@@ -88,8 +125,7 @@ impl From<Credential> for CredentialSerde {
         Self {
             id: v.id,
             service: v.service,
-            username: (&v.username).into(),
-            secret: (&v.secret).into(),
+            data: v.data.into(),
             label: v.label,
         }
     }
@@ -177,45 +213,92 @@ impl Default for CredentialSecret {
 }
 
 #[derive(Debug, Clone)]
+pub enum CredentialData {
+    OAuth {
+        client_id: CredentialSecret,
+        client_secret: CredentialSecret,
+        access_token: CredentialSecret,
+        refresh_token: CredentialSecret,
+        expires_at: i64,
+    },
+    Password {
+        username: CredentialSecret,
+        secret: CredentialSecret,
+    },
+}
+impl TryFrom<CredentialDataSerde> for CredentialData {
+    type Error = WatsonError;
+
+    fn try_from(c: CredentialDataSerde) -> Result<Self, Self::Error> {
+        match c {
+            CredentialDataSerde::Password { username, secret } => Ok(Self::Password {
+                username: username.try_into()?,
+                secret: secret.try_into()?,
+            }),
+            CredentialDataSerde::OAuth {
+                client_id,
+                client_secret,
+                access_token,
+                refresh_token,
+                expires_at,
+            } => Ok(Self::OAuth {
+                client_id: client_id.try_into()?,
+                client_secret: client_secret.try_into()?,
+                access_token: access_token.try_into()?,
+                refresh_token: refresh_token.try_into()?,
+                expires_at,
+            }),
+        }
+    }
+}
+
+#[derive(Debug, Clone)]
 pub struct Credential {
     pub id: String,
     pub service: CredentialService,
-    pub username: CredentialSecret,
-    pub secret: CredentialSecret,
     pub label: String,
+    pub data: CredentialData,
 }
 
 impl Credential {
-    pub fn new(
-        username: String,
-        secret: String,
-        service: CredentialService,
-        label: String,
-    ) -> Self {
+    pub fn new(data: CredentialData, service: CredentialService, label: String) -> Self {
         Self {
             id: uuid::Uuid::new_v4().to_string(),
             service,
-            username: CredentialSecret::Decrypted(username),
-            secret: CredentialSecret::Decrypted(secret),
+            data,
             label,
         }
     }
     pub fn unlock(&mut self, key: &[u8]) -> Result<(), WatsonError> {
         let aad = format!("{}:{}", self.service, self.id);
-        if let CredentialSecret::Encrypted { nonce, ciphertext } = &self.username {
-            let decrypted_bytes = decrypt(ciphertext, key, nonce, aad.as_bytes())?;
-            let decrypted = String::from_utf8(decrypted_bytes)
-                .map_err(|e| watson_err!(WatsonErrorKind::Deserialization, e.to_string()))?;
+        let decrypt_field = |field: &mut CredentialSecret| -> Result<(), WatsonError> {
+            if let CredentialSecret::Encrypted { nonce, ciphertext } = field {
+                let decrypted_bytes = decrypt(ciphertext, key, nonce, aad.as_bytes())?;
+                let decrypted = String::from_utf8(decrypted_bytes)
+                    .map_err(|e| watson_err!(WatsonErrorKind::Deserialization, e.to_string()))?;
+                *field = CredentialSecret::Decrypted(decrypted);
+            }
+            Ok(())
+        };
 
-            self.username = CredentialSecret::Decrypted(decrypted);
-        }
-
-        if let CredentialSecret::Encrypted { nonce, ciphertext } = &self.secret {
-            let decrypted_bytes = decrypt(ciphertext, key, nonce, aad.as_bytes())?;
-            let decrypted = String::from_utf8(decrypted_bytes)
-                .map_err(|e| watson_err!(WatsonErrorKind::Deserialization, e.to_string()))?;
-            self.secret = CredentialSecret::Decrypted(decrypted);
-        }
+        match &mut self.data {
+            CredentialData::Password { username, secret } => {
+                decrypt_field(username)?;
+                decrypt_field(secret)?;
+            }
+            CredentialData::OAuth {
+                client_id,
+                client_secret,
+                access_token,
+                refresh_token,
+                ..
+            } => {
+                decrypt_field(client_id)?;
+                decrypt_field(client_secret)?;
+                decrypt_field(access_token)?;
+                decrypt_field(refresh_token)?;
+            }
+        };
 
         Ok(())
     }
@@ -235,8 +318,24 @@ impl Credential {
             Ok(())
         };
 
-        encrypt_field(&mut self.username)?;
-        encrypt_field(&mut self.secret)?;
+        match &mut self.data {
+            CredentialData::Password { username, secret } => {
+                encrypt_field(username)?;
+                encrypt_field(secret)?;
+            }
+            CredentialData::OAuth {
+                client_id,
+                client_secret,
+                access_token,
+                refresh_token,
+                ..
+            } => {
+                encrypt_field(client_id)?;
+                encrypt_field(client_secret)?;
+                encrypt_field(access_token)?;
+                encrypt_field(refresh_token)?;
+            }
+        }
 
         Ok(())
     }
@@ -249,8 +348,7 @@ impl TryFrom<CredentialSerde> for Credential {
         Ok(Self {
             id: c.id,
             service: c.service,
-            username: c.username.try_into()?,
-            secret: c.secret.try_into()?,
+            data: c.data.try_into()?,
             label: c.label,
         })
     }
@@ -353,7 +451,6 @@ impl CredentialManager {
     pub fn unlock(&mut self) -> Result<(), WatsonError> {
         self.credentials
             .iter_mut()
-            .filter(|c| c.secret.is_locked() || c.username.is_locked())
             .map(|c| c.unlock(&self.key))
             .collect()
     }
