@@ -21,7 +21,6 @@ use crate::{
     watson_err,
 };
 
-use super::tui::CredentialService;
 // Load master key
 // Deserialize JSON fields
 
@@ -77,8 +76,7 @@ impl From<&CredentialSecret> for CredentialSecretSerde {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum CredentialDataSerde {
     OAuth {
-        client_id: CredentialSecretSerde,
-        client_secret: CredentialSecretSerde,
+        service: CredentialService,
         access_token: CredentialSecretSerde,
         refresh_token: CredentialSecretSerde,
         expires_at: i64,
@@ -97,14 +95,12 @@ impl From<CredentialData> for CredentialDataSerde {
                 secret: (&secret).into(),
             },
             CredentialData::OAuth {
-                client_id,
-                client_secret,
+                service,
                 access_token,
                 refresh_token,
                 expires_at,
             } => Self::OAuth {
-                client_id: (&client_id).into(),
-                client_secret: (&client_secret).into(),
+                service,
                 access_token: (&access_token).into(),
                 refresh_token: (&refresh_token).into(),
                 expires_at,
@@ -244,8 +240,7 @@ impl Default for CredentialSecret {
 #[derive(Debug, Clone)]
 pub enum CredentialData {
     OAuth {
-        client_id: CredentialSecret,
-        client_secret: CredentialSecret,
+        service: CredentialService,
         access_token: CredentialSecret,
         refresh_token: CredentialSecret,
         expires_at: i64,
@@ -266,14 +261,12 @@ impl TryFrom<CredentialDataSerde> for CredentialData {
                 secret: secret.try_into()?,
             }),
             CredentialDataSerde::OAuth {
-                client_id,
-                client_secret,
+                service,
                 access_token,
                 refresh_token,
                 expires_at,
             } => Ok(Self::OAuth {
-                client_id: client_id.try_into()?,
-                client_secret: client_secret.try_into()?,
+                service,
                 access_token: access_token.try_into()?,
                 refresh_token: refresh_token.try_into()?,
                 expires_at,
@@ -318,14 +311,10 @@ impl Credential {
                 decrypt_field(secret)?;
             }
             CredentialData::OAuth {
-                client_id,
-                client_secret,
                 access_token,
                 refresh_token,
                 ..
             } => {
-                decrypt_field(client_id)?;
-                decrypt_field(client_secret)?;
                 decrypt_field(access_token)?;
                 decrypt_field(refresh_token)?;
             }
@@ -356,14 +345,10 @@ impl Credential {
                 encrypt_field(secret)?;
             }
             CredentialData::OAuth {
-                client_id,
-                client_secret,
                 access_token,
                 refresh_token,
                 ..
             } => {
-                encrypt_field(client_id)?;
-                encrypt_field(client_secret)?;
                 encrypt_field(access_token)?;
                 encrypt_field(refresh_token)?;
             }
@@ -384,6 +369,42 @@ impl TryFrom<CredentialSerde> for Credential {
             data: c.data.try_into()?,
             label: c.label,
         })
+    }
+}
+// -------- Service ------------
+#[derive(Debug, Clone, Copy, Deserialize, Serialize)]
+pub enum CredentialService {
+    Icloud,
+    Google,
+    None,
+}
+impl CredentialService {
+    pub const LEN: usize = 2;
+    pub const ALL: [Self; 2] = [Self::Icloud, Self::Google];
+    pub fn itos(index: usize) -> Self {
+        match index {
+            0 => Self::Icloud,
+            1 => Self::Google,
+            _ => Self::None,
+        }
+    }
+    pub fn is_empty(&self) -> bool {
+        matches!(self, Self::None)
+    }
+}
+impl Default for CredentialService {
+    fn default() -> Self {
+        Self::None
+    }
+}
+impl Display for CredentialService {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let st = match self {
+            Self::Icloud => "ICloud",
+            Self::Google => "Google",
+            Self::None => "",
+        };
+        write!(f, "{}", st)
     }
 }
 

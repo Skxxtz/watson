@@ -20,6 +20,11 @@ pub struct WatsonError {
 
 #[derive(Debug)]
 pub enum WatsonErrorKind {
+    GoogleAuth,
+
+    CommandExecute,
+
+    HttpPostRequest,
     HttpGetRequest,
     Deserialization,
     Serialization,
@@ -39,6 +44,14 @@ pub enum WatsonErrorKind {
 
     Base64Encode,
     Base64Decode,
+
+    TcpServer,
+    StreamRead,
+    StreamWrite,
+    StreamBind,
+    StreamConnect,
+
+    UrlFormat,
 
     Decryption,
     Encryption,

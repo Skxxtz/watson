@@ -1,4 +1,3 @@
-
 #[derive(Default)]
 struct CredentialBuilder {
     id: Option<String>,

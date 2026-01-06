@@ -226,6 +226,7 @@ dependencies = [
  "chacha20poly1305",
  "chrono",
  "chrono-tz",
+ "hyper",
  "ical",
  "keyring",
  "memchr",

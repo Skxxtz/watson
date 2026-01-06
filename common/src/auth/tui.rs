@@ -1,12 +1,11 @@
-use std::{
-    fmt::Display,
-    io::{Read, StdinLock, Write, stdin, stdout},
-};
-
-use serde::{Deserialize, Serialize};
+use std::io::{Read, StdinLock, Write, stdin, stdout};
 
 use crate::{
-    auth::{Credential, CredentialData, CredentialManager, credentials::CredentialSecret},
+    auth::{
+        Credential, CredentialData, CredentialManager, CredentialService,
+        credentials::CredentialSecret,
+    },
+    calendar::google::{client_auth, exchange_code_for_tokens, wait_for_auth_code},
     errors::WatsonError,
 };
 
@@ -34,7 +33,7 @@ impl<'a> AuthTui<'a> {
         })
     }
 
-    pub fn run(&mut self) -> Result<(), WatsonError> {
+    pub async fn run(&mut self) -> Result<(), WatsonError> {
         let mut state = UiState::MainMenu;
         let mut menu = MenuState { selected: 0 };
 
@@ -49,7 +48,8 @@ impl<'a> AuthTui<'a> {
                 UiState::NewAccount(s) => {
                     render_new_account(s);
                     if let Some(next) =
-                        update_new_account(s, read_input(&mut self.stdin), &mut self.manager)?
+                        update_new_account(s, read_input(&mut self.stdin), &mut self.manager)
+                            .await?
                     {
                         state = next;
                     }
@@ -148,42 +148,6 @@ enum AccountField {
     Label,
     OpenBrowser,
     Save,
-}
-
-#[derive(Debug, Clone, Copy, Deserialize, Serialize)]
-pub enum CredentialService {
-    Icloud,
-    Google,
-    None,
-}
-impl CredentialService {
-    const LEN: usize = 2;
-    const ALL: [Self; 2] = [Self::Icloud, Self::Google];
-    fn itos(index: usize) -> Self {
-        match index {
-            0 => Self::Icloud,
-            1 => Self::Google,
-            _ => Self::None,
-        }
-    }
-    fn is_empty(&self) -> bool {
-        matches!(self, Self::None)
-    }
-}
-impl Default for CredentialService {
-    fn default() -> Self {
-        Self::None
-    }
-}
-impl Display for CredentialService {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        let st = match self {
-            Self::Icloud => "ICloud",
-            Self::Google => "Google",
-            Self::None => "",
-        };
-        write!(f, "{}", st)
-    }
 }
 
 struct NewAccountState {
@@ -306,15 +270,26 @@ fn render_new_account(s: &NewAccountState) {
                 "*".repeat(secret.len())
             );
         }
-        CredentialData::OAuth { .. } => {
-            println!(
-                "{} Proceed in Broser →",
-                if matches!(s.field, AccountField::OpenBrowser) {
-                    ">"
-                } else {
-                    " "
-                }
-            );
+        CredentialData::OAuth { access_token, .. } => {
+            if !access_token.is_empty() {
+                println!(
+                    "{} Authenticated ✓",
+                    if matches!(s.field, AccountField::OpenBrowser) {
+                        ">"
+                    } else {
+                        " "
+                    }
+                );
+            } else {
+                println!(
+                    "{} Proceed in Broser →",
+                    if matches!(s.field, AccountField::OpenBrowser) {
+                        ">"
+                    } else {
+                        " "
+                    }
+                );
+            }
         }
         CredentialData::Empty => {}
     }
@@ -341,7 +316,7 @@ fn render_new_account(s: &NewAccountState) {
     }
 }
 
-fn update_new_account(
+async fn update_new_account(
     s: &mut NewAccountState,
     input: Input,
     manager: &mut CredentialManager,
@@ -403,7 +378,28 @@ fn update_new_account(
                 }
                 AccountField::Username => AccountField::Password,
                 AccountField::Password => AccountField::Label,
-                AccountField::OpenBrowser => AccountField::Label,
+                AccountField::OpenBrowser => {
+                    match s.service {
+                        CredentialService::Google => {
+                            client_auth()?;
+
+                            match tokio::task::spawn_blocking(wait_for_auth_code).await {
+                                Ok(code) => {
+                                    if let Ok(code) = code.await {
+                                        if let Ok(response) = exchange_code_for_tokens(&code).await
+                                        {
+                                            s.data = response.to_credential_data();
+                                            println!("{:?}", s.data);
+                                        }
+                                    }
+                                }
+                                _ => {}
+                            };
+                        }
+                        _ => {}
+                    }
+                    AccountField::Label
+                }
                 AccountField::Label => {
                     // Save to credential manager
                     let cred = Credential::new(s.data.clone(), s.service, s.label.take());
@@ -455,8 +451,7 @@ fn update_service_selection(
                     let service = CredentialService::itos(state.selected);
                     let data = match &service {
                         CredentialService::Google => CredentialData::OAuth {
-                            client_id: CredentialSecret::Decrypted(String::new()),
-                            client_secret: CredentialSecret::Decrypted(String::new()),
+                            service: service.clone(),
                             access_token: CredentialSecret::Decrypted(String::new()),
                             refresh_token: CredentialSecret::Decrypted(String::new()),
                             expires_at: 0,

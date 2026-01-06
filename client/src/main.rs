@@ -35,7 +35,7 @@ async fn main() {
     let (tx, rx) = broadcast::channel::<Vec<u8>>(2);
     let state = Rc::new(RefCell::new(UiState::new()));
 
-    let _ = ArgParse::parse(std::env::args());
+    let _ = ArgParse::parse(std::env::args()).await;
     let _ = connect(tx).await;
 
     let notification_store = Rc::new(RefCell::new(NotificationStore::new()));
