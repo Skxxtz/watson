@@ -1,4 +1,4 @@
-use std::rc::Rc;
+use std::{cell::Cell, rc::Rc};
 
 use chrono::{DateTime, FixedOffset, NaiveDate, Utc};
 use reqwest::Client;
@@ -110,6 +110,7 @@ impl GoogleCalendarEvent {
                 .unwrap_or_default(),
             calendar_info,
             event_type: CalEventType::Timed,
+            seen: Cell::new(false),
         }
     }
 }

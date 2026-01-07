@@ -1,6 +1,6 @@
 use gtk4::{
     cairo::Context,
-    gdk::FrameClock,
+    gdk::{FrameClock, RGBA},
     glib::{
         WeakRef,
         object::{ObjectExt, ObjectType},
@@ -130,6 +130,15 @@ impl Rgba {
         let b = self.b.powf(2.2);
         (0.299 * r + 0.587 * g + 0.114 * b).powf(1.0 / 2.2)
     }
+
+    pub fn invert(&self) -> Self {
+        Self {
+            r: 1.0 - self.r,
+            g: 1.0 - self.g,
+            b: 1.0 - self.b,
+            a: self.a,
+        }
+    }
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -218,6 +227,17 @@ impl From<Hsl> for Rgba {
     }
 }
 
+impl From<RGBA> for Rgba {
+    fn from(v: RGBA) -> Self {
+        Self {
+            r: v.red() as f64,
+            g: v.green() as f64,
+            b: v.blue() as f64,
+            a: v.alpha() as f64,
+        }
+    }
+}
+
 fn hue_to_rgb(p: f64, q: f64, t: f64) -> f64 {
     let mut t = t;
     if t < 0.0 {
@@ -297,6 +317,7 @@ impl AnimationState {
         }
     }
     pub fn start(&self, direction: AnimationDirection) {
+        self.progress.set(0.0);
         self.running.set(true);
         self.last_time.set(None);
         self.direction.set(direction);
@@ -335,6 +356,7 @@ impl AnimationState {
 
         // Stop animation if done
         if eased_progress >= 1.0 || eased_progress <= 0.0 {
+            self.progress.set(1.0);
             self.running.set(false);
         }
     }

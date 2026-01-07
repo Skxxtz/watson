@@ -1,4 +1,5 @@
 use std::{
+    cell::Cell,
     collections::{HashMap, HashSet},
     rc::Rc,
 };
@@ -50,6 +51,8 @@ pub struct CalDavEvent {
     pub calendar_info: Rc<CalendarInfo>,
 
     pub event_type: CalEventType,
+
+    pub seen: Cell<bool>,
 }
 impl TryFrom<IcalEvent> for CalDavEvent {
     type Error = WatsonError;

@@ -422,6 +422,14 @@ fn draw_event(
         lane,
         lanes_total,
     } = layout;
+    let progress = if layout.event.seen.get() {
+        1.0
+    } else {
+        if progress >= 1.0 {
+            layout.event.seen.set(true);
+        }
+        progress
+    };
 
     let start_y =
         (start_secs / context.total_seconds) * (context.inner_height) + context.padding_top;
@@ -491,12 +499,13 @@ fn draw_event(
         // Location
         if let Some(loc) = &event.location {
             ctx.save().unwrap();
+            ctx.set_font_size(10.0);
             ctx.select_font_face(
                 &context.font,
                 gtk4::cairo::FontSlant::Normal,
-                gtk4::cairo::FontWeight::Normal
+                gtk4::cairo::FontWeight::Normal,
             );
-            ctx.move_to(x + 10.0, start_y + 27.0);
+            ctx.move_to(x + 10.0, start_y + 26.0);
             ctx.show_text(loc).unwrap();
 
             ctx.restore().unwrap();
