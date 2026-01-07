@@ -52,10 +52,10 @@ window {
 
 .notification {
     transition: box-shadow 0.2s ease;
-    padding: 10px;
+    padding: 15px;
     background: var(--notification-background);
     border: 1px solid var(--notification-border);
-    border-radius: 10px;
+    border-radius: 20px;
     min-height: 55px;
     color: var(--notification-color);
 }

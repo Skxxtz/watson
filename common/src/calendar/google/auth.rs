@@ -1,5 +1,6 @@
 use std::{collections::HashMap, process::Command};
 
+use chrono::Utc;
 use reqwest::{Client, Url};
 use serde::Deserialize;
 use tokio::{
@@ -17,12 +18,26 @@ const CLIENT_ID: &str = "571128954566-ma98chaempk6lsmn469r6ls2589psv01.apps.goog
 const CLIENT_SECRET: &str = "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";
 
 #[derive(Debug, Deserialize)]
+pub struct GoogleRefreshTokenResponse {
+    pub access_token: String,
+}
+#[derive(Debug, Deserialize)]
 pub struct GoogleTokenResponse {
     pub access_token: String,
     pub expires_in: u64,
     pub refresh_token: String,
     pub scope: String,
     pub token_type: String,
+}
+impl From<GoogleTokenResponse> for CredentialData {
+    fn from(value: GoogleTokenResponse) -> Self {
+        Self::OAuth {
+            service: crate::auth::CredentialService::Google,
+            access_token: crate::auth::CredentialSecret::Decrypted(value.access_token),
+            refresh_token: crate::auth::CredentialSecret::Decrypted(value.refresh_token),
+            expires_at: Utc::now().timestamp() + 3600,
+        }
+    }
 }
 impl GoogleTokenResponse {
     pub fn to_credential_data(self) -> CredentialData {
@@ -146,4 +161,41 @@ pub async fn wait_for_auth_code() -> Result<String, WatsonError> {
         .map_err(|e| watson_err!(WatsonErrorKind::StreamWrite, e.to_string()))?;
 
     Ok(code)
+}
+
+pub struct GoogleAuth;
+impl GoogleAuth {
+    pub async fn refresh_credential(refresh_token: &str) -> Result<String, WatsonError> {
+        let client = Client::new();
+        let mut params = HashMap::new();
+
+        params.insert("client_id", CLIENT_ID);
+        params.insert("client_secret", CLIENT_SECRET);
+        params.insert("refresh_token", refresh_token);
+        params.insert("grant_type", "refresh_token");
+
+        let resp = client
+            .post("https://oauth2.googleapis.com/token")
+            .form(&params)
+            .send()
+            .await
+            .map_err(|e| watson_err!(WatsonErrorKind::HttpGetRequest, e.to_string()))?;
+
+        if !resp.status().is_success() {
+            return Err(watson_err!(
+                WatsonErrorKind::GoogleAuth,
+                "Failed to retrieve OAuth2 credentials."
+            ));
+        }
+
+        let text = resp
+            .text()
+            .await
+            .map_err(|e| watson_err!(WatsonErrorKind::HttpPostRequest, e.to_string()))?;
+
+        let response: GoogleRefreshTokenResponse = serde_json::from_str(&text)
+            .map_err(|e| watson_err!(WatsonErrorKind::Deserialization, e.to_string()))?;
+
+        Ok(response.access_token)
+    }
 }

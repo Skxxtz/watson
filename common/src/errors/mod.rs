@@ -1,9 +1,19 @@
 #[macro_export]
 macro_rules! watson_err {
+    // Case with just a message literal
     ($kind:expr, $msg:expr) => {
         WatsonError {
             kind: $kind,
             message: $msg.into(),
+            file: file!(),
+            line: line!(),
+        }
+    };
+    // Case with message + format arguments
+    ($kind:expr, $fmt:expr, $($args:tt)*) => {
+        WatsonError {
+            kind: $kind,
+            message: format!($fmt, $($args)*),
             file: file!(),
             line: line!(),
         }
@@ -21,6 +31,7 @@ pub struct WatsonError {
 #[derive(Debug)]
 pub enum WatsonErrorKind {
     GoogleAuth,
+    GoogleCalendar,
 
     CommandExecute,
 
@@ -28,6 +39,8 @@ pub enum WatsonErrorKind {
     HttpGetRequest,
     Deserialization,
     Serialization,
+
+    DateParse,
 
     UndefinedAttribute,
     InvalidAttribute,

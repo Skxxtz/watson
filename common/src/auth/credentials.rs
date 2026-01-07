@@ -357,6 +357,16 @@ impl Credential {
 
         Ok(())
     }
+    pub fn save(&self) -> Result<(), WatsonError> {
+        let mut manager = CredentialManager::new()?;
+
+        let creds = manager.credentials_mut()?;
+        if let Some(c) = creds.into_iter().find(|c| c.id == self.id) {
+            c.data = self.data.clone();
+        }
+
+        manager.save()
+    }
 }
 
 impl TryFrom<CredentialSerde> for Credential {

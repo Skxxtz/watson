@@ -32,6 +32,8 @@ pub enum WidgetSpec {
         #[serde(flatten)]
         base: WidgetBase,
 
+        dimensions: Option<(i32, i32)>,
+
         #[serde(default)]
         selection: Option<CalendarRule>,
 

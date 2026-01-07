@@ -271,24 +271,15 @@ fn render_new_account(s: &NewAccountState) {
             );
         }
         CredentialData::OAuth { access_token, .. } => {
-            if !access_token.is_empty() {
-                println!(
-                    "{} Authenticated ✓",
-                    if matches!(s.field, AccountField::OpenBrowser) {
-                        ">"
-                    } else {
-                        " "
-                    }
-                );
+            let indicator = if matches!(s.field, AccountField::OpenBrowser) {
+                ">"
             } else {
-                println!(
-                    "{} Proceed in Broser →",
-                    if matches!(s.field, AccountField::OpenBrowser) {
-                        ">"
-                    } else {
-                        " "
-                    }
-                );
+                " "
+            };
+            if !access_token.is_empty() {
+                println!("{} Authenticated ✓", indicator);
+            } else {
+                println!("{} Proceed in Browser →", indicator);
             }
         }
         CredentialData::Empty => {}

@@ -1,5 +1,5 @@
 use super::structs::*;
-use chrono::{DateTime, Datelike, NaiveDate, NaiveDateTime, Utc};
+use chrono::{DateTime, Datelike, NaiveDate, Utc};
 
 pub fn last_day_of_month(year: i32, month: u32) -> u32 {
     // Handle December specially
@@ -21,31 +21,30 @@ pub fn last_day_of_month(year: i32, month: u32) -> u32 {
 
 pub fn parse_until(s: &str) -> Option<DateTimeSpec> {
     if s.len() == 8 {
-        // YYYYMMDD
+        // YYYYMMDD -> date-only
         NaiveDate::parse_from_str(s, "%Y%m%d")
             .ok()
             .map(DateTimeSpec::Date)
     } else if s.ends_with('Z') {
-        NaiveDateTime::parse_from_str(s, "%Y%m%dT%H%M%SZ")
+        // UTC datetime
+        DateTime::parse_from_str(s, "%Y%m%dT%H%M%SZ")
             .ok()
             .map(|dt| DateTimeSpec::DateTime {
-                value: dt,
+                value: dt.with_timezone(&Utc),
                 tzid: Some("UTC".into()),
             })
     } else {
-        NaiveDateTime::parse_from_str(s, "%Y%m%dT%H%M%S")
+        // naive/floating datetime
+        DateTime::parse_from_str(s, "%Y%m%dT%H%M%S")
             .ok()
             .map(|dt| DateTimeSpec::DateTime {
-                value: dt,
-                tzid: None,
+                value: dt.with_timezone(&Utc),
+                tzid: Some("floating".into()),
             })
     }
 }
 
-pub fn parse_exdate(prop: ical::property::Property) -> Option<Vec<DateTimeSpec>> {
-    parse_rdate(prop)
-}
-
+pub use parse_rdate as parse_exdate;
 pub fn parse_rdate(prop: ical::property::Property) -> Option<Vec<DateTimeSpec>> {
     let val = &prop.value?;
     Some(

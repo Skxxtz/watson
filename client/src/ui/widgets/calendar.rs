@@ -14,11 +14,16 @@ use gtk4::{
 
 use crate::ui::widgets::utils::{CairoShapesExt, Rgba};
 use common::{
-    auth::CredentialManager,
-    calendar::icloud::{CalDavEvent, CalEventType, PropfindInterface},
+    auth::{CredentialData, CredentialManager},
+    calendar::{
+        google::GoogleCalendarClient,
+        icloud::PropfindInterface,
+        utils::{CalDavEvent, CalEventType},
+    },
 };
 
 struct CalendarContext {
+    font: String,
     padding: f64,
     padding_top: f64,
 
@@ -133,45 +138,71 @@ impl Calendar {
                 }
 
                 for account in credential_manager.credentials {
-                    let mut interface = PropfindInterface::new(account);
-                    match interface.get_principal().await {
-                        Ok(_) => match interface.get_calendars().await {
-                            Ok(calendar_info) => match interface.get_events(calendar_info).await {
-                                Ok(mut evs) => {
-                                    let today = Local::now().to_utc();
-
-                                    if let WidgetSpec::Calendar { selection, .. } = specs.as_ref() {
-                                        evs.retain(|e| {
-                                            selection.as_ref().map_or(true, |s| {
-                                                s.is_allowed(&e.calendar_info.name)
-                                            }) && e.occurs_on_day(&today)
-                                        });
-                                    } else {
-                                        evs.retain(|e| e.occurs_on_day(&today));
-                                    }
-
-                                    let mut timed = Vec::new();
-                                    let mut allday = Vec::new();
-                                    for item in evs {
-                                        match item.event_type {
-                                            CalEventType::Timed => timed.push(item),
-                                            CalEventType::AllDay => allday.push(item),
-                                        }
-                                    }
-                                    events_timed.borrow_mut().extend(timed);
-                                    events_allday.borrow_mut().extend(allday);
-
-                                    // Internally ques draw
-                                    state.start(AnimationDirection::Forward {
-                                        duration: 0.7,
-                                        function: EaseFunction::EaseOutCubic,
-                                    });
+                    let evs = match account.data {
+                        CredentialData::OAuth { .. } => {
+                            let mut client = GoogleCalendarClient::new(account);
+                            let calendars = match client.get_calendars().await {
+                                Ok(v) => v,
+                                Err(e) => {
+                                    println!("{:?}", e);
+                                    return;
                                 }
-                                Err(e) => eprintln!("Failed to fetch events: {:?}", e),
-                            },
-                            Err(e) => eprintln!("Failed to fetch calendars: {:?}", e),
-                        },
-                        Err(e) => eprintln!("Failed to get principal: {:?}", e),
+                            };
+                            client.get_events(calendars).await
+                        }
+                        CredentialData::Password { .. } => {
+                            let mut interface = PropfindInterface::new(account);
+                            match interface.get_principal().await {
+                                Ok(_) => match interface.get_calendars().await {
+                                    Ok(calendar_info) => interface.get_events(calendar_info).await,
+                                    Err(e) => {
+                                        eprintln!("Failed to fetch calendars: {:?}", e);
+                                        continue;
+                                    }
+                                },
+                                Err(e) => {
+                                    eprintln!("Failed to get principal: {:?}", e);
+                                    continue;
+                                }
+                            }
+                        }
+                        CredentialData::Empty => continue,
+                    };
+
+                    // Filter events
+                    match evs {
+                        Ok(mut evs) => {
+                            let today = Local::now().to_utc();
+
+                            if let WidgetSpec::Calendar { selection, .. } = specs.as_ref() {
+                                evs.retain(|e| {
+                                    selection
+                                        .as_ref()
+                                        .map_or(true, |s| s.is_allowed(&e.calendar_info.name))
+                                        && e.occurs_on_day(&today)
+                                });
+                            } else {
+                                evs.retain(|e| e.occurs_on_day(&today));
+                            }
+
+                            let mut timed = Vec::new();
+                            let mut allday = Vec::new();
+                            for item in evs {
+                                match item.event_type {
+                                    CalEventType::Timed => timed.push(item),
+                                    CalEventType::AllDay => allday.push(item),
+                                }
+                            }
+                            events_timed.borrow_mut().extend(timed);
+                            events_allday.borrow_mut().extend(allday);
+
+                            // Internally ques draw
+                            state.start(AnimationDirection::Forward {
+                                duration: 0.7,
+                                function: EaseFunction::EaseOutCubic,
+                            });
+                        }
+                        Err(e) => eprintln!("Failed to fetch events: {:?}", e),
                     }
                 }
             }
@@ -262,6 +293,7 @@ impl Calendar {
                 100.0
             };
             CalendarContext {
+                font: font.to_string(),
                 padding,
                 padding_top,
                 inner_width: width as f64 - 2.0 * padding,
@@ -278,7 +310,7 @@ impl Calendar {
         ctx.set_source_rgb(color_r, color_g, color_b);
         ctx.set_font_size(50.0);
         ctx.select_font_face(
-            font,
+            &context.font,
             gtk4::cairo::FontSlant::Normal,
             gtk4::cairo::FontWeight::Normal,
         );
@@ -325,7 +357,7 @@ impl Calendar {
             // Draw hour text
             ctx.set_source_rgb(color_r, color_g, color_b);
             ctx.select_font_face(
-                font,
+                &context.font,
                 gtk4::cairo::FontSlant::Normal,
                 gtk4::cairo::FontWeight::Bold,
             );
@@ -338,7 +370,7 @@ impl Calendar {
         // Draw events
         ctx.set_operator(gtk4::cairo::Operator::Over);
         ctx.select_font_face(
-            font,
+            &context.font,
             gtk4::cairo::FontSlant::Normal,
             gtk4::cairo::FontWeight::Bold,
         );
@@ -448,11 +480,27 @@ fn draw_event(
         let cx = x + lane_width - 10.0;
         CairoShapesExt::vert_centered_text(ctx, &time, cx, cy);
     } else {
+        // Title
         ctx.move_to(x + 10.0, start_y + 15.0);
         ctx.show_text(summary).unwrap();
 
+        // Time
         ctx.move_to(x + lane_width - 45.0, start_y + 15.0);
         ctx.show_text(&time).unwrap();
+
+        // Location
+        if let Some(loc) = &event.location {
+            ctx.save().unwrap();
+            ctx.select_font_face(
+                &context.font,
+                gtk4::cairo::FontSlant::Normal,
+                gtk4::cairo::FontWeight::Normal
+            );
+            ctx.move_to(x + 10.0, start_y + 27.0);
+            ctx.show_text(loc).unwrap();
+
+            ctx.restore().unwrap();
+        }
     }
 
     Some(())
