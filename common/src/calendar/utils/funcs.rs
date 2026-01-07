@@ -31,7 +31,6 @@ pub fn parse_until(s: &str) -> Option<DateTimeSpec> {
             .ok()
             .map(|dt| DateTimeSpec::DateTime {
                 value: dt.with_timezone(&Utc),
-                tzid: Some("UTC".into()),
             })
     } else {
         // naive/floating datetime
@@ -39,7 +38,6 @@ pub fn parse_until(s: &str) -> Option<DateTimeSpec> {
             .ok()
             .map(|dt| DateTimeSpec::DateTime {
                 value: dt.with_timezone(&Utc),
-                tzid: Some("floating".into()),
             })
     }
 }

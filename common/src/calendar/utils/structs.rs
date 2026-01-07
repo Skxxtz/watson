@@ -12,10 +12,7 @@ use crate::{
 #[derive(Debug, Clone, PartialEq)]
 pub enum DateTimeSpec {
     Date(NaiveDate),
-    DateTime {
-        value: DateTime<Utc>,
-        tzid: Option<String>,
-    },
+    DateTime { value: DateTime<Utc> },
 }
 impl DateTimeSpec {
     pub fn utc_time(&self) -> DateTime<Utc> {
@@ -109,10 +106,7 @@ impl TryFrom<ical::property::Property> for DateTimeSpec {
                 Utc.from_utc_datetime(&naive)
             };
 
-            Ok(DateTimeSpec::DateTime {
-                value: dt_utc,
-                tzid,
-            })
+            Ok(DateTimeSpec::DateTime { value: dt_utc })
         }
     }
 }

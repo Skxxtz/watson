@@ -86,13 +86,21 @@ pub struct GoogleCalendarEvent {
 }
 impl GoogleCalendarEvent {
     fn to_cal_dav_event(self, calendar_info: Rc<CalendarInfo>) -> CalDavEvent {
+        let start = self.start.map(|v| v.into());
+        let end = self.end.map(|v| v.into());
+        let event_type = match (start.as_ref(), end.as_ref()) {
+            (Some(DateTimeSpec::DateTime { .. }), Some(DateTimeSpec::DateTime { .. })) => {
+                CalEventType::Timed
+            }
+            _ => CalEventType::AllDay,
+        };
         CalDavEvent {
             uid: self.id,
             summary: self.summary,
             description: self.description,
             location: self.location,
-            start: self.start.map(|v| v.into()),
-            end: self.end.map(|v| v.into()),
+            start,
+            end,
             recurrence: self
                 .recurrence
                 .and_then(|v| v.into_iter().next())
@@ -109,7 +117,7 @@ impl GoogleCalendarEvent {
                 .map(|a| a.into_iter().map(|v| v.into()).collect())
                 .unwrap_or_default(),
             calendar_info,
-            event_type: CalEventType::Timed,
+            event_type,
             seen: Cell::new(false),
         }
     }
@@ -121,10 +129,6 @@ pub enum GoogleEventDateTime {
     DateTime {
         #[serde(rename = "dateTime")]
         date_time: DateTime<FixedOffset>,
-
-        #[serde(default)]
-        #[serde(rename = "timeZone")]
-        tzid: Option<String>,
     },
     Date {
         date: NaiveDate,
@@ -134,9 +138,8 @@ impl From<GoogleEventDateTime> for DateTimeSpec {
     fn from(v: GoogleEventDateTime) -> Self {
         match v {
             GoogleEventDateTime::Date { date } => Self::Date(date),
-            GoogleEventDateTime::DateTime { date_time, tzid } => Self::DateTime {
+            GoogleEventDateTime::DateTime { date_time } => Self::DateTime {
                 value: date_time.to_utc(),
-                tzid,
             },
         }
     }

@@ -4,7 +4,7 @@ use std::{
     rc::Rc,
 };
 
-use chrono::{DateTime, Datelike, Duration, Utc, Weekday};
+use chrono::{DateTime, Datelike, Duration, NaiveTime, TimeZone, Utc, Weekday};
 use ical::parser::ical::component::IcalEvent;
 
 use crate::{
@@ -142,6 +142,9 @@ impl CalDavEvent {
             return false;
         };
 
+        if self.summary.is_none() {
+            println!("{:?}", self);
+        }
         // If the event is recurring, delegate
         if self.recurrence.is_some() {
             return self.handle_recurrence(day);
@@ -152,7 +155,9 @@ impl CalDavEvent {
         let end_utc = self.end.as_ref().map(|e| e.utc_time()).unwrap_or(start_utc);
 
         // Compare day ignoring time (assuming day is at midnight UTC)
-        let day_start = day.to_utc();
+        let day = day.date_naive();
+        let day_start =
+            Utc.from_utc_datetime(&day.and_time(NaiveTime::from_hms_opt(0, 0, 0).unwrap()));
         let day_end = day_start + Duration::days(1) - Duration::seconds(1); // 23:59:59 of that day
 
         start_utc <= day_end && end_utc >= day_start
