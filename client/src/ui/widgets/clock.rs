@@ -58,7 +58,7 @@ impl Clock {
         let WidgetSpec::Clock {
             base: _,
             time_zone,
-            head_style,
+            hand_style: head_style,
             accent_color,
             font,
         } = specs
@@ -91,6 +91,7 @@ impl Clock {
         let inner_width = width as f64 - 2.0 * padding;
 
         let clock = ClockContext {
+            color: Rgba::from(_area.color()),
             center: inner_height / 2.0 + padding,
             head_margin: 12.0,
             radius: (inner_width.min(inner_height) / 2.0) as f64,
@@ -109,7 +110,8 @@ impl Clock {
         ctx.set_line_cap(gtk4::cairo::LineCap::Round);
 
         // Clock Face
-        ctx.set_source_rgb(1.0, 1.0, 1.0);
+        let inverse = clock.color.invert();
+        ctx.set_source_rgb(inverse.r, inverse.g, inverse.b);
         CairoShapesExt::circle(ctx, clock.center, clock.center, inner_height / 2.0);
 
         CairoShapesExt::circle(ctx, clock.center, clock.center, 5.0);
@@ -117,27 +119,29 @@ impl Clock {
         // Draw hour marks
         let line_length = 10.0;
         let line_offset = 4.0;
+        let muted3 = clock.color.lerp(&inverse, 0.3);
         for i in 1..=12 {
-            ctx.set_source_rgb(0.0, 0.0, 0.0);
+            ctx.set_source_rgb(clock.color.r, clock.color.g, clock.color.b);
             let angle = i as f64 * (2.0 * std::f64::consts::PI / 12.0);
             let x1 = clock.center + (clock.radius - line_length - line_offset) * angle.sin();
             let y1 = clock.center - (clock.radius - line_length - line_offset) * angle.cos();
             let x2 = clock.center + (clock.radius - line_offset) * angle.sin();
             let y2 = clock.center - (clock.radius - line_offset) * angle.cos();
-            let x3 = clock.center + (clock.radius - line_length * 2.7) * angle.sin();
-            let y3 = clock.center - (clock.radius - line_length * 2.7) * angle.cos();
+            let x3 = clock.center + (clock.radius - line_length * 2.5) * angle.sin();
+            let y3 = clock.center - (clock.radius - line_length * 2.5) * angle.cos();
 
             ctx.move_to(x1, y1);
             ctx.line_to(x2, y2);
             ctx.stroke().unwrap();
 
             // Draw text
-            ctx.set_source_rgb(0.3, 0.3, 0.3);
+            ctx.set_source_rgb(muted3.r, muted3.g, muted3.b);
             CairoShapesExt::centered_text(ctx, &i.to_string(), x3, y3);
         }
 
         // Draw minute marks
-        ctx.set_source_rgb(0.5, 0.5, 0.5);
+        let muted6 = clock.color.lerp(&inverse, 0.6);
+        ctx.set_source_rgb(muted6.r, muted6.g, muted6.b);
         let line_length = 5.0;
         let line_offset = 4.0;
         for i in 1..=60 {
@@ -181,6 +185,7 @@ impl Clock {
         // Draw Second Hand
         HandStyle::Modern {
             color: accent_color.into(),
+            width: 6.0,
         }
         .second_head(&ctx, &clock);
 
@@ -200,13 +205,14 @@ impl Clock {
 #[derive(Debug, Clone, Deserialize, Serialize)]
 #[serde(rename_all = "lowercase")]
 pub enum HandStyle {
-    Modern { color: String },
-    Sharp { color: String },
+    Modern { color: String, width: f64 },
+    Sharp { color: String, width: f64 },
 }
 impl Default for HandStyle {
     fn default() -> Self {
         Self::Modern {
             color: "#000000".into(),
+            width: 6.0,
         }
     }
 }
@@ -216,7 +222,7 @@ impl HandStyle {
         let line_length = clock.radius * 0.5;
 
         match self {
-            Self::Modern { color } => {
+            Self::Modern { color, width } => {
                 // Draw hour head
                 let Rgba { r, g, b, a } = Rgba::from_str(&color).unwrap_or_default();
                 ctx.set_source_rgba(r, g, b, a);
@@ -228,7 +234,7 @@ impl HandStyle {
                 ctx.line_to(x1, y1);
                 ctx.stroke().unwrap();
 
-                ctx.set_line_width(6.0);
+                ctx.set_line_width(*width);
                 let x2 = clock.center + line_length * angle.sin();
                 let y2 = clock.center - line_length * angle.cos();
 
@@ -236,12 +242,12 @@ impl HandStyle {
                 ctx.line_to(x2, y2);
                 ctx.stroke().unwrap();
             }
-            Self::Sharp { color } => {
+            Self::Sharp { color, width } => {
                 let Rgba { r, g, b, a } = Rgba::from_str(&color).unwrap_or_default();
                 ctx.set_source_rgba(r, g, b, a);
                 ctx.set_line_width(1.0);
 
-                let thickness = 8.0;
+                let thickness = width; // default 8.0
                 let half_t = thickness / 2.0;
                 let k = 0.4;
 
@@ -280,10 +286,10 @@ impl HandStyle {
     }
     fn minute_hand(&self, ctx: &Context, clock: &ClockContext) {
         let angle = (clock.minute + clock.second / 60.0) * 6.0 * (PI / 180.0);
-        let line_length = clock.radius * 0.9;
+        let line_length = clock.radius * 0.76;
 
         match self {
-            Self::Modern { color } => {
+            Self::Modern { color, width } => {
                 // Draw minute head
                 let Rgba { r, g, b, a } = Rgba::from_str(&color).unwrap_or_default();
                 ctx.set_source_rgba(r, g, b, a);
@@ -295,7 +301,7 @@ impl HandStyle {
                 ctx.line_to(x1, y1);
                 ctx.stroke().unwrap();
 
-                ctx.set_line_width(6.0);
+                ctx.set_line_width(*width);
                 let x2 = clock.center + line_length * angle.sin();
                 let y2 = clock.center - line_length * angle.cos();
 
@@ -303,12 +309,12 @@ impl HandStyle {
                 ctx.line_to(x2, y2);
                 ctx.stroke().unwrap();
             }
-            Self::Sharp { color } => {
+            Self::Sharp { color, width } => {
                 let Rgba { r, g, b, a } = Rgba::from_str(&color).unwrap_or_default();
                 ctx.set_source_rgba(r, g, b, a);
                 ctx.set_line_width(1.0);
 
-                let thickness = 9.0;
+                let thickness = width; // default 9.0;
                 let half_t = thickness / 2.0;
                 let k = 0.3;
 
@@ -348,7 +354,7 @@ impl HandStyle {
 
     fn second_head(&self, ctx: &Context, clock: &ClockContext) {
         match self {
-            Self::Modern { color } => {
+            Self::Modern { color, .. } => {
                 // Draw second head
                 let Rgba { r, g, b, a } = Rgba::from_str(&color).unwrap_or_default();
                 ctx.set_source_rgba(r, g, b, a);
@@ -376,6 +382,7 @@ impl HandStyle {
 }
 
 struct ClockContext {
+    color: Rgba,
     center: f64,
     head_margin: f64,
     radius: f64,

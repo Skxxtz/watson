@@ -56,7 +56,7 @@ pub enum WidgetSpec {
         time_zone: Option<String>,
 
         #[serde(default)]
-        head_style: HandStyle,
+        hand_style: HandStyle,
 
         #[serde(default = "default_accent")]
         accent_color: String,
