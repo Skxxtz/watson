@@ -1,43 +1,63 @@
-# Calendar
+# Calendar Widget
 
-## Credential Storage and Security
+A lightweight, performant calendar widget built for Watson. It provides a unified view of your schedule by integrating multiple cloud providers with a focus on security and ease of use.
 
-Watson stores calendar credentials encrypted on the local system to protect against accidental disclosure and casual inspection (for example via backups or configuration files).
+## Features
 
-Credentials are encrypted using a randomly generated master key and modern authenticated encryption. The master key is stored locally and is not transmitted or shared. This design allows Watson to retrieve calendar data unattended after login, without requiring additional user interaction or desktop-specific keyring services.
+* **Multi-Service Support**: Native integration with iCloud and Google Calendar.
+* **Encrypted Storage**: Secure, local-first credential management.
+* **Async Synchronization**: Non-blocking data fetching to keep the UI responsive.
+* **Privacy Focused**: Direct connection to providers without intermediary servers.
 
-This approach provides protection for data at rest but does not protect against malware running under the user account, a compromised system, or direct memory access while the application is running.
+---
 
-Watson does not rely on external credential managers or operating-system keyrings to ensure predictable behavior across environments.
+## Security & Credential Storage
 
-Watson uses XChaCha20-Poly1305 for password encryption.
+Watson prioritizes the security of your access tokens and passwords. Credentials are stored on the local system using **authenticated encryption (XChaCha20-Poly1305)** to prevent unauthorized access via backups or configuration file inspection.
+
+### The Security Model
+* **Master Key**: A randomly generated master key is stored locally to allow for unattended background refreshes after login.
+* **Encrypted at Rest**: All service tokens and app-specific passwords are encrypted before being written to disk.
+* **Independence**: Watson does not rely on external OS keyrings (like GNOME Keyring or KWallet). This ensures consistent behavior across different desktop environments and headless setups.
+
+> [!IMPORTANT]
+> This design protects data at rest but does not defend against active malware running under the same user account or direct memory access while the process is active.
+
+---
 
 ## Supported Services
 
-### iCloud
+### ☁️ iCloud
+Watson connects to iCloud via the CalDAV protocol. For security, Apple requires the use of an **App-Specific Password**.
 
-Watson can automatically connect to your iCloud calendars. For this to work, it
-needs (1) your AppleID, and (2) an app-specific password.
+#### 1. Generate an App-Specific Password
+1. Sign in to [appleid.apple.com](https://appleid.apple.com).
+2. Navigate to **Sign-In and Security** > **App-Specific Passwords**.
+3. Click the **+** icon, enter a label (e.g., "Watson"), and click **Create**.
+4. Copy the generated password.
 
-#### Configuration on iCloud
-
-1. Go to icloud.com
-2. Sign-In
-3. Click on your profile picture
-4. Click "Manage Apple Account"
-5. Go to "Sign-In and Security"
-6. Click "App-Specific Passwords"
-7. Create new password. (Give it a name like "watson")
-
-#### Configuration in Watson
-
-1. Launch Watson's Authentication TUI with:
-
+#### 2. Configure Watson
+Run the Authentication TUI:
 ```bash
 watson auth
 ```
-1. Choose `Configure New Account` from the menu.
-2. Select ***iCloud*** as the service
-3. Enter your **Apple ID** and the **app-specific password** you created on iCloud.
-4. Give the account a descriptive label (e.g., "Personal iCloud").
-5. Save your credentials by pressing `<RETURN>`.
+* Select **Configure New Account** > **iCloud**.
+* Enter your **Apple ID** and the **App-Specific Password**.
+* Assign a label (e.g., "Personal") and save.
+
+---
+
+### ☁️ Google Calendar
+*Status: Implementation complete. Currently pending Google Application Verification.*
+
+Google integration uses OAuth 2.0 for secure access without sharing your primary password.
+
+#### Configuration
+1. Run `watson auth` and select **Google**.
+2. A browser window will open requesting access to your Google Calendar.
+3. Once authorized, Watson will automatically receive and encrypt your access tokens.
+
+> [!NOTE]
+> Until Google verification is finalized, this service will not work. 
+
+---
