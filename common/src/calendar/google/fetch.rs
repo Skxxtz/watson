@@ -72,7 +72,9 @@ struct GoogleCalendarEventList {
 #[derive(Debug, Deserialize)]
 pub struct GoogleCalendarEvent {
     pub id: String,
-    pub summary: Option<String>,
+
+    #[serde(rename = "summary")]
+    pub title: Option<String>,
     pub description: Option<String>,
     pub location: Option<String>,
 
@@ -98,7 +100,7 @@ impl GoogleCalendarEvent {
         };
         CalDavEvent {
             uid: self.id,
-            summary: self.summary,
+            title: self.title.unwrap_or("Untitled Event".into()),
             description: self.description,
             location: self.location,
             start,

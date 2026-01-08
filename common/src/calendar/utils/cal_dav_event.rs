@@ -1,7 +1,6 @@
-
 use std::{cell::Cell, sync::Arc};
 
-use chrono::{DateTime, Datelike, Duration, NaiveDate, NaiveTime, TimeZone, Utc, Weekday};
+use chrono::{DateTime, Datelike, Local, NaiveDate, NaiveTime, Utc, Weekday};
 use ical::parser::ical::component::IcalEvent;
 
 use crate::{
@@ -24,7 +23,7 @@ pub struct CalendarInfo {
 pub struct CalDavEvent {
     pub uid: String,
 
-    pub summary: Option<String>,
+    pub title: String,
     pub description: Option<String>,
     pub location: Option<String>,
 
@@ -64,7 +63,7 @@ impl TryFrom<IcalEvent> for CalDavEvent {
                     })?;
                 }
 
-                "SUMMARY" => out.summary = prop.value,
+                "SUMMARY" => out.title = prop.value.unwrap_or(out.title),
                 "DESCRIPTION" => out.description = prop.value,
                 "LOCATION" => out.location = prop.value,
 
@@ -134,28 +133,25 @@ impl Default for CalEventType {
 }
 
 impl CalDavEvent {
-    pub fn occurs_on_day(&self, day: &DateTime<Utc>) -> bool {
+    pub fn occurs_on_day(&self, day_to_check: &NaiveDate) -> bool {
         let Some(start) = self.start.as_ref() else {
             return false;
         };
-        // Compute start and end as UTC
-        let start_utc = start.utc_time();
-        let end_utc = self.end.as_ref().map(|e| e.utc_time()).unwrap_or(start_utc);
 
-        // If the event is recurring, delegate
-        if let Some(reccurence) = &self.recurrence {
-            let handler = RecurrenceHandler::from_raw(&reccurence.raw, &self.rdates, &self.exdates);
-            let active = handler.is_active_on(&start_utc, day);
-            return active
+        let start_local = start.utc_time().with_timezone(&Local).date_naive();
+        let end_local = self
+            .end
+            .as_ref()
+            .map(|e| e.utc_time().with_timezone(&Local).date_naive())
+            .unwrap_or(start_local);
+
+        if let Some(recurrence) = &self.recurrence {
+            let handler = RecurrenceHandler::from_raw(&recurrence.raw, &self.rdates, &self.exdates);
+            let active = handler.is_active_on(&start_local, day_to_check);
+            return active;
         }
 
-        // Compare day ignoring time (assuming day is at midnight UTC)
-        let day = day.date_naive();
-        let day_start =
-            Utc.from_utc_datetime(&day.and_time(NaiveTime::from_hms_opt(0, 0, 0).unwrap()));
-        let day_end = day_start + Duration::days(1) - Duration::seconds(1); // 23:59:59 of that day
-
-        start_utc <= day_end && end_utc >= day_start
+        *day_to_check >= start_local && *day_to_check <= end_local
     }
 }
 
@@ -182,7 +178,11 @@ pub struct RecurrenceHandler<'d> {
     neg_byyearday: Vec<i16>,
 }
 impl<'d> RecurrenceHandler<'d> {
-    pub fn from_raw(raw: &str, rdates: &'d Vec<DateTimeSpec>, exdates: &'d Vec<DateTimeSpec>) -> Self {
+    pub fn from_raw(
+        raw: &str,
+        rdates: &'d Vec<DateTimeSpec>,
+        exdates: &'d Vec<DateTimeSpec>,
+    ) -> Self {
         let mut freq = Freq::Daily;
         let mut interval = 1;
         let mut until = None;
@@ -301,21 +301,33 @@ impl<'d> RecurrenceHandler<'d> {
     }
 
     #[inline(always)]
-    pub fn is_active_on(&self, dt_start: &DateTime<Utc>, target: &DateTime<Utc>) -> bool {
+    pub fn is_active_on(&self, dt_start: &NaiveDate, target: &NaiveDate) -> bool {
         // UNTIL early return
         if let Some(u) = &self.until {
-            if target.timestamp() > *u {
+            if target
+                .and_time(NaiveTime::from_hms_opt(0, 0, 0).unwrap())
+                .and_utc()
+                .timestamp()
+                > *u
+            {
                 return false;
             }
         }
 
         // RDATE and EXDATE check
-        let target_naive = target.date_naive();
-        if self.exdates.iter().any(|ex| ex.utc_time().date_naive() == target_naive) {
-            return false
+        if self
+            .exdates
+            .iter()
+            .any(|ex| ex.utc_time().date_naive() == *target)
+        {
+            return false;
         }
-        if self.rdates.iter().any(|ex| ex.utc_time().date_naive() == target_naive) {
-            return true
+        if self
+            .rdates
+            .iter()
+            .any(|ex| ex.utc_time().date_naive() == *target)
+        {
+            return true;
         }
 
         // Restraint check
@@ -329,16 +341,18 @@ impl<'d> RecurrenceHandler<'d> {
         if !has_day_constraints {
             match self.freq {
                 Freq::Weekly => {
-                    if target.weekday() != dt_start.weekday() { return false}
-                },
+                    if target.weekday() != dt_start.weekday() {
+                        return false;
+                    }
+                }
                 Freq::Monthly => {
                     if target.day() != dt_start.day() {
-                        return false
+                        return false;
                     }
                 }
                 Freq::Yearly => {
                     if target.month() != dt_start.month() || target.day() != dt_start.day() {
-                        return false
+                        return false;
                     }
                 }
                 Freq::Daily => {}
@@ -439,16 +453,19 @@ impl<'d> RecurrenceHandler<'d> {
         // Frequency Interval Logic
         match self.freq {
             Freq::Daily => {
-                let diff = (target.date_naive() - dt_start.date_naive()).num_days();
+                let diff = (*target - *dt_start).num_days();
                 diff >= 0 && diff % self.interval == 0
             }
             Freq::Weekly => {
-                let s_monday = dt_start.date_naive().num_days_from_ce() - dt_start.weekday().num_days_from_monday() as i32;
-                let t_monday = target.date_naive().num_days_from_ce() - target.weekday().num_days_from_monday() as i32;
+                let s_monday =
+                    dt_start.num_days_from_ce() - dt_start.weekday().num_days_from_monday() as i32;
+                let t_monday =
+                    target.num_days_from_ce() - target.weekday().num_days_from_monday() as i32;
                 ((t_monday - s_monday) / 7) % self.interval as i32 == 0
             }
             Freq::Monthly => {
-                let months_since = (target.year() - dt_start.year()) * 12 + (target.month() as i32 - dt_start.month() as i32);
+                let months_since = (target.year() - dt_start.year()) * 12
+                    + (target.month() as i32 - dt_start.month() as i32);
                 months_since >= 0 && months_since as i64 % self.interval == 0
             }
             Freq::Yearly => {
