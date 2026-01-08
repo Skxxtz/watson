@@ -162,9 +162,22 @@ impl Battery {
             }
         };
 
-        ctx.set_source_rgba(color.r, color.g, color.b, color.a);
+        // Background Track
         ctx.set_line_cap(LineCap::Round);
         ctx.set_line_width(bat.line_width);
+        ctx.set_source_rgba(color.r, color.g, color.b, 0.15);
+        CairoShapesExt::circle_path(
+            ctx,
+            bat.center,
+            bat.center,
+            bat.height / 2.0 - bat.line_width / 2.0,
+            1.0,
+        );
+        ctx.close_path();
+        ctx.stroke().unwrap();
+
+        // Progress arc
+        ctx.set_source_rgba(color.r, color.g, color.b, color.a);
         CairoShapesExt::circle_path(
             ctx,
             bat.center,
