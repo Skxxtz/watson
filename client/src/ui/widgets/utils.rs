@@ -104,6 +104,20 @@ impl CairoShapesExt {
         ctx.move_to(cx, y);
         ctx.show_text(text).unwrap();
     }
+    pub fn rjust_text(ctx: &Context, text: &str, cx: f64, cy: f64, center_vert: bool) {
+        let ext = ctx.text_extents(text).unwrap();
+
+        let y = if center_vert {
+            let font_ext = ctx.font_extents().unwrap();
+            cy + (font_ext.ascent() - font_ext.descent()) / 2.0
+        } else {
+            cy
+        };
+
+        let x = cx - (ext.width() + ext.x_bearing());
+        ctx.move_to(x, y);
+        ctx.show_text(text).unwrap();
+    }
 }
 
 #[derive(Default, Debug, Clone, Copy)]

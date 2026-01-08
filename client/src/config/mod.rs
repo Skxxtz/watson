@@ -1,2 +1,2 @@
 mod structs;
-pub use structs::{WidgetSpec, load_config};
+pub use structs::{CalendarHMFormat, WidgetSpec, load_config};

@@ -47,6 +47,9 @@ pub enum WidgetSpec {
         hours_past: u8,
         #[serde(default = "default_calendar_hours_fut")]
         hours_future: u8,
+
+        #[serde(default = "default_hm_format")]
+        hm_format: CalendarHMFormat,
     },
     Clock {
         #[serde(flatten)]
@@ -148,6 +151,12 @@ fn default_calendar_hours_past() -> u8 {
 fn default_calendar_hours_fut() -> u8 {
     8
 }
+fn default_hm_format() -> CalendarHMFormat {
+    CalendarHMFormat {
+        event: "%H:%M".into(),
+        timeline: "%H:%M".into(),
+    }
+}
 fn default_battery_gradient() -> [String; 3] {
     [
         "#68A357".to_string(),
@@ -157,4 +166,10 @@ fn default_battery_gradient() -> [String; 3] {
 }
 fn default_battery_threshold() -> u8 {
     40
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize, Default)]
+pub struct CalendarHMFormat {
+    pub event: String,
+    pub timeline: String,
 }

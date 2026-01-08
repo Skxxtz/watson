@@ -45,7 +45,13 @@ async fn main() {
         let state = Rc::clone(&state);
         move |app| {
             // Load Config
-            let config = load_config().unwrap_or_default();
+            let config = match load_config() {
+                Ok(s) => s,
+                Err(e) => {
+                    eprintln!("{:?}", e);
+                    return;
+                }
+            };
 
             // Load css
             let provider = CssProvider::new();

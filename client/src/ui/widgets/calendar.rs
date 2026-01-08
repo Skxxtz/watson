@@ -1,5 +1,5 @@
 use crate::{
-    config::WidgetSpec,
+    config::{CalendarHMFormat, WidgetSpec},
     ui::widgets::utils::{AnimationDirection, AnimationState, EaseFunction},
 };
 use std::{cell::RefCell, rc::Rc, str::FromStr};
@@ -31,6 +31,8 @@ struct CalendarContext {
     window_start: NaiveDateTime,
     window_end: NaiveDateTime,
     total_seconds: f64,
+
+    hm_format: CalendarHMFormat,
 }
 
 pub struct Calendar;
@@ -226,6 +228,7 @@ impl Calendar {
             font,
             hours_past,
             hours_future,
+            hm_format,
             ..
         } = spec
         else {
@@ -281,17 +284,34 @@ impl Calendar {
             } else {
                 100.0
             };
+            let line_offset = {
+                ctx.save().unwrap();
+                ctx.select_font_face(
+                    &font,
+                    gtk4::cairo::FontSlant::Normal,
+                    gtk4::cairo::FontWeight::Bold,
+                );
+                ctx.set_font_size(12.0);
+                let time = NaiveTime::from_hms_opt(3, 33, 0)
+                    .unwrap()
+                    .format(&hm_format.timeline)
+                    .to_string();
+                let ext = ctx.text_extents(&time).unwrap();
+                ctx.restore().unwrap();
+                ext.width() + 10.0
+            };
             CalendarContext {
                 font: font.to_string(),
                 padding,
                 padding_top,
                 inner_width: width as f64 - 2.0 * padding,
                 inner_height: height as f64 - padding - padding_top,
-                line_offset: 40.0,
+                line_offset,
                 todate,
                 window_start,
                 window_end,
                 total_seconds: (window_end - window_start).num_seconds() as f64,
+                hm_format: hm_format.clone(),
             }
         };
 
@@ -351,9 +371,16 @@ impl Calendar {
                 gtk4::cairo::FontWeight::Bold,
             );
             ctx.set_font_size(12.0);
-            let time_label = format!("{:02}:00", hour);
-            ctx.move_to(context.padding, y + context.padding_top + 4.0);
-            ctx.show_text(&time_label).unwrap();
+            let time_label = NaiveTime::from_hms_opt(hour, 0, 0)
+                .unwrap()
+                .format(&context.hm_format.timeline)
+                .to_string();
+            CairoShapesExt::vert_centered_text(
+                ctx,
+                &time_label,
+                context.padding,
+                y + context.padding_top,
+            );
         }
 
         // Draw events
@@ -463,7 +490,12 @@ fn draw_event(
     );
     let summary = event.summary.as_deref().unwrap_or("Untitled Event");
     let start_time = context.window_start + Duration::seconds(start_secs as i64);
-    let time = start_time.time().format("%H:%M").to_string();
+    let end_time = context.window_start + Duration::seconds(end_secs as i64);
+    let time_str = format!(
+        "{} - {}",
+        start_time.time().format(&context.hm_format.event),
+        end_time.time().format(&context.hm_format.event),
+    );
 
     let extents = ctx.text_extents(&summary).unwrap();
     let text_height = extents.height();
@@ -474,16 +506,14 @@ fn draw_event(
         let cy = top + usable_height / 2.0;
         let cx = x + 10.0;
         CairoShapesExt::vert_centered_text(ctx, summary, cx, cy);
-        let cx = x + lane_width - 45.0;
-        CairoShapesExt::vert_centered_text(ctx, &time, cx, cy);
+        CairoShapesExt::rjust_text(ctx, &time_str, x + lane_width - 12.0, cy, true);
     } else {
         // Title
         ctx.move_to(x + 10.0, start_y + 15.0);
         ctx.show_text(summary).unwrap();
 
         // Time
-        ctx.move_to(x + lane_width - 45.0, start_y + 15.0);
-        ctx.show_text(&time).unwrap();
+        CairoShapesExt::rjust_text(ctx, &time_str, x + lane_width - 12.0, start_y + 15.0, false);
 
         // Location
         if let Some(loc) = &event.location {
