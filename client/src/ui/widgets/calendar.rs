@@ -4,10 +4,10 @@ use crate::{
 };
 use std::{cell::RefCell, rc::Rc, str::FromStr};
 
-use chrono::{Duration, Local, NaiveDate, NaiveDateTime, NaiveTime, Timelike};
+use chrono::{Local, NaiveDate, NaiveDateTime, NaiveTime, Timelike};
 use gtk4::{
     DrawingArea, GestureClick,
-    cairo::Context,
+    cairo::{Context, FontSlant, FontWeight},
     glib::object::ObjectExt,
     prelude::{DrawingAreaExtManual, GestureSingleExt, WidgetExt, WidgetExtManual},
 };
@@ -351,7 +351,7 @@ impl Calendar {
             ctx.set_line_cap(gtk4::cairo::LineCap::Round);
             ctx.set_line_width(0.5);
 
-            let hour = window_start.hour() + offset as u32;
+            let hour = (window_start.hour() + offset as u32).clamp(0, 23);
             let y = (offset as f64 / hours_to_show as f64) * context.inner_height;
             ctx.move_to(
                 context.padding + context.line_offset,
@@ -431,103 +431,91 @@ fn draw_event(
     context: &CalendarContext,
     progress: f64,
 ) -> Option<()> {
-    let EventLayout {
-        event,
-        start_secs,
-        end_secs,
-        lane,
-        lanes_total,
-    } = layout;
-    let progress = if layout.event.seen.get() {
-        1.0
-    } else {
-        if progress >= 1.0 {
-            layout.event.seen.set(true);
-        }
+    let EventLayout { event, start_secs, end_secs, lane, lanes_total } = layout;
+
+    // Animation State
+    let alpha = if event.seen.get() { 1.0 } else {
+        if progress >= 1.0 { event.seen.set(true); }
         progress
     };
 
-    let start_y =
-        (start_secs / context.total_seconds) * (context.inner_height) + context.padding_top;
+    // Geometry Calculation
+    let start_y = (start_secs / context.total_seconds) * context.inner_height + context.padding_top;
     let end_y = (end_secs / context.total_seconds) * context.inner_height + context.padding_top;
-    let top = start_y + 1.0;
-
-    let color = event.calendar_info.color.as_deref().unwrap_or("#e9a949");
-    let event_color = Rgba::from_str(color).unwrap_or_default();
-    ctx.set_source_rgba(event_color.r, event_color.g, event_color.b, 0.9 * progress);
-
-    // Handle event that ends past the window
-    let (rect_height, rad) = if layout.end_secs > context.total_seconds {
-        let overflow = layout.end_secs - context.total_seconds;
-        let pad_time = (context.padding / context.inner_height) * context.total_seconds;
-        let frac = (overflow / pad_time).min(1.0);
-
-        let rect_height = (end_y - start_y).max(1.0) - 2.0 + frac * context.padding;
-
-        let rad = if frac < 1.0 {
-            (5.0, 5.0, 5.0, 5.0)
-        } else {
-            (5.0, 5.0, 0.0, 0.0)
-        };
-        (rect_height, rad)
-    } else {
-        ((end_y - start_y).max(1.0) - 2.0, (5.0, 5.0, 5.0, 5.0))
-    };
-
+    let rect_height = (end_y - start_y).max(18.0); // Minimum height for visibility
     let lane_width = (context.inner_width - context.line_offset) / lanes_total as f64;
-    let x = context.padding + context.line_offset + lane as f64 * lane_width;
-
-    CairoShapesExt::rounded_rectangle(ctx, x, top, lane_width - 2.0, rect_height, rad);
+    let x = context.padding + context.line_offset + (lane as f64 * lane_width);
+    
+    // Coloring
+    let color_str = event.calendar_info.color.as_deref().unwrap_or("#e9a949");
+    let base_color = Rgba::from_str(color_str).unwrap_or_default();
+    
+    // Background
+    ctx.set_source_rgba(base_color.r, base_color.g, base_color.b, 0.3 * alpha);
+    let rad = if end_secs > context.total_seconds { (5.0, 5.0, 0.0, 0.0) } else { (5.0, 5.0, 5.0, 5.0) };
+    CairoShapesExt::rounded_rectangle(ctx, x + 1.0, start_y + 1.0, lane_width - 3.0, rect_height - 2.0, rad);
     ctx.fill().unwrap();
 
-    // Event label
-    ctx.set_font_size(11.0);
-    ctx.set_source_rgba(
-        0.0,
-        0.0,
-        0.0,
-        0.7 * event_color.perceived_brightness_gamma() * progress,
-    );
+    // Left Accent Bar
+    ctx.set_source_rgba(base_color.r, base_color.g, base_color.b, 0.9 * alpha);
+    CairoShapesExt::rounded_rectangle(ctx, x + 1.0, start_y + 1.0, 4.0, rect_height - 2.0, (5.0, 0.0, 0.0, 5.0));
+    ctx.fill().unwrap();
+
+    // Text Content 
     let summary = event.summary.as_deref().unwrap_or("Untitled Event");
-    let start_time = context.window_start + Duration::seconds(start_secs as i64);
-    let end_time = context.window_start + Duration::seconds(end_secs as i64);
-    let time_str = format!(
-        "{} - {}",
-        start_time.time().format(&context.hm_format.event),
-        end_time.time().format(&context.hm_format.event),
-    );
+    let start_time = context.window_start + chrono::Duration::seconds(start_secs as i64);
+    let time_str = start_time.time().format(&context.hm_format.event).to_string();
 
-    let extents = ctx.text_extents(&summary).unwrap();
-    let text_height = extents.height();
+    // Label 
+    ctx.set_source_rgba(base_color.r, base_color.g, base_color.b, 0.8 * alpha); // Dark text for light background
+    ctx.select_font_face(&context.font, FontSlant::Normal, FontWeight::Bold);
+    
+    let is_tiny_event = rect_height < 30.0;
+    let padding_x = 10.0;
 
-    if (rect_height - text_height).abs() <= 10.0 {
-        let bottom = start_y + rect_height - 1.0;
-        let usable_height = bottom - top;
-        let cy = top + usable_height / 2.0;
-        let cx = x + 10.0;
-        CairoShapesExt::vert_centered_text(ctx, summary, cx, cy);
-        CairoShapesExt::rjust_text(ctx, &time_str, x + lane_width - 12.0, cy, true);
+    if is_tiny_event {
+        // Single line layout: [ Summary ... Time ]
+        ctx.set_font_size(10.0);
+        let cy = start_y + (rect_height / 2.0);
+        
+        // Only draw time if lane is wide enough
+        // let _time_extents = ctx.text_extents(&time_str).unwrap();
+        if lane_width > 100.0 {
+            CairoShapesExt::rjust_text(ctx, &time_str, x + lane_width - 8.0, cy, true);
+        }
+        
+        // Draw summary with clipping (implicit)
+        CairoShapesExt::vert_centered_text(ctx, summary, x + padding_x, cy);
     } else {
-        // Title
-        ctx.move_to(x + 10.0, start_y + 15.0);
+        // Multi-line layout
+        ctx.set_font_size(11.0);
+        ctx.move_to(x + padding_x, start_y + 16.0);
         ctx.show_text(summary).unwrap();
 
-        // Time
-        CairoShapesExt::rjust_text(ctx, &time_str, x + lane_width - 12.0, start_y + 15.0, false);
+        ctx.set_font_size(9.0);
+        ctx.select_font_face(&context.font, FontSlant::Normal, FontWeight::Normal);
+        
+        // Time below title
+        ctx.move_to(x + padding_x, start_y + 28.0);
+        ctx.show_text(&time_str).unwrap();
 
-        // Location
+        // Location at bottom or 3rd line
         if let Some(loc) = &event.location {
-            ctx.save().unwrap();
-            ctx.set_font_size(10.0);
-            ctx.select_font_face(
-                &context.font,
-                gtk4::cairo::FontSlant::Normal,
-                gtk4::cairo::FontWeight::Normal,
-            );
-            ctx.move_to(x + 10.0, start_y + 26.0);
-            ctx.show_text(loc).unwrap();
+            if rect_height > 45.0 {
+                let loc_width = ctx.text_extents(&loc).unwrap().width();
+                let inner_width = lane_width - 2.0 * padding_x;
+                let text = if loc_width > inner_width {
+                    let avg_char_width = loc_width / loc.len() as f64;
+                    let take_chars = (inner_width / avg_char_width).floor() as usize;
 
-            ctx.restore().unwrap();
+                    &format!("{}…", &loc[..take_chars.saturating_sub(1)])
+                } else {
+                    loc
+                };
+
+                ctx.move_to(x + padding_x, start_y + 40.0);
+                ctx.show_text(&text).unwrap();
+            }
         }
     }
 
@@ -588,67 +576,77 @@ fn compute_event_layouts<'a>(
             let end = event.end.as_ref()?.utc_time().with_timezone(&Local);
 
             let duration = end.signed_duration_since(start);
-            let start = ctx.todate.and_time(start.time());
-            let end = start + duration;
+            let start_dt = ctx.todate.and_time(start.time());
+            let end_dt = start_dt + duration;
 
-            if end <= ctx.window_start || start >= ctx.window_end {
+            if end_dt <= ctx.window_start || start_dt >= ctx.window_end {
                 return None;
             }
 
-            let visible_start = start.max(ctx.window_start);
-            let visible_end = end.min(ctx.window_end);
+            let visible_start = start_dt.max(ctx.window_start);
+            let visible_end = end_dt.min(ctx.window_end);
 
-            Some((
+            Some(EventLayout {
                 event,
-                (visible_start - ctx.window_start).num_seconds() as f64,
-                (visible_end - ctx.window_start).num_seconds() as f64,
-            ))
+                start_secs: (visible_start - ctx.window_start).num_seconds() as f64,
+                end_secs: (visible_end - ctx.window_start).num_seconds() as f64,
+                lane: 0,
+                lanes_total: 0,
+            })
         })
         .collect();
 
-    // Sort by start time
-    spans.sort_by(|a, b| a.1.total_cmp(&b.1));
+    // 1. Sort by start time
+    spans.sort_by(|a, b| a.start_secs.total_cmp(&b.start_secs));
 
-    // Sweep line to assign lanes
-    let mut active: Vec<EventLayout> = Vec::new();
-    let mut layouts = Vec::new();
+    let mut result = Vec::new();
+    let mut cluster: Vec<EventLayout> = Vec::new();
+    let mut cluster_end = 0.0;
 
-    for (event, start_secs, end_secs) in spans {
-        // Partition active into currently overlapping and finished
-        let (mut still_active, mut finished): (Vec<_>, Vec<_>) = active
-            .into_iter()
-            .partition(|layout| layout.end_secs > start_secs);
+    // 2. Group into clusters
+    for layout in spans {
+        if cluster.is_empty() || layout.start_secs < cluster_end {
+            // Event overlaps with the current cluster
+            cluster_end = cluster_end.max(layout.end_secs);
+            cluster.push(layout);
+        } else {
+            // New cluster started; process the finished one
+            process_cluster(&mut cluster, &mut result);
+            cluster_end = layout.end_secs;
+            cluster.push(layout);
+        }
+    }
+    
+    // Process final cluster
+    process_cluster(&mut cluster, &mut result);
 
-        // Flush finished events
-        layouts.append(&mut finished);
+    result
+}
 
-        // Find the smallest free lane
+fn process_cluster<'a>(cluster: &mut Vec<EventLayout<'a>>, result: &mut Vec<EventLayout<'a>>) {
+    if cluster.is_empty() { return; }
+
+    let mut max_lane = 0;
+    
+    // Assign lanes within the cluster
+    for i in 0..cluster.len() {
         let mut lane = 0;
-        while still_active.iter().any(|l| l.lane == lane) {
+        // Check all previous events in this cluster for lane collisions
+        while cluster[..i].iter().any(|prev| {
+            prev.lane == lane && 
+            cluster[i].start_secs < prev.end_secs && 
+            cluster[i].end_secs > prev.start_secs
+        }) {
             lane += 1;
         }
-
-        // Add the new event
-        still_active.push(EventLayout {
-            event,
-            start_secs,
-            end_secs,
-            lane,
-            lanes_total: 0,
-        });
-
-        // Update lanes_total for all currently active events
-        let lanes_total = still_active.len();
-        for layout in still_active.iter_mut() {
-            layout.lanes_total = lanes_total;
-        }
-
-        // Update active
-        active = still_active;
+        cluster[i].lane = lane;
+        max_lane = max_lane.max(lane);
     }
 
-    // Flush any remaining active events
-    layouts.extend(active);
-
-    layouts
+    // Set lanes_total to the max lanes needed for the entire cluster
+    let total = max_lane + 1;
+    for mut layout in cluster.drain(..) {
+        layout.lanes_total = total;
+        result.push(layout);
+    }
 }

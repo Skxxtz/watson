@@ -1,3 +1,4 @@
+
 use std::{cell::Cell, sync::Arc};
 
 use chrono::{DateTime, Datelike, Duration, NaiveDate, NaiveTime, TimeZone, Utc, Weekday};
@@ -143,8 +144,9 @@ impl CalDavEvent {
 
         // If the event is recurring, delegate
         if let Some(reccurence) = &self.recurrence {
-            let handler = RecurrenceHandler::from_raw(&reccurence.raw);
-            return handler.is_active_on(&start_utc, day);
+            let handler = RecurrenceHandler::from_raw(&reccurence.raw, &self.rdates, &self.exdates);
+            let active = handler.is_active_on(&start_utc, day);
+            return active
         }
 
         // Compare day ignoring time (assuming day is at midnight UTC)
@@ -157,10 +159,15 @@ impl CalDavEvent {
     }
 }
 
-pub struct RecurrenceHandler {
+#[derive(Debug)]
+pub struct RecurrenceHandler<'d> {
     interval: i64,
     freq: Freq,
     until: Option<i64>,
+
+    // R/EXDATES
+    rdates: &'d Vec<DateTimeSpec>,
+    exdates: &'d Vec<DateTimeSpec>,
 
     // Masks
     byday_mask: u8,
@@ -174,8 +181,8 @@ pub struct RecurrenceHandler {
     neg_byweekno: Vec<i8>,
     neg_byyearday: Vec<i16>,
 }
-impl RecurrenceHandler {
-    pub fn from_raw(raw: &str) -> Self {
+impl<'d> RecurrenceHandler<'d> {
+    pub fn from_raw(raw: &str, rdates: &'d Vec<DateTimeSpec>, exdates: &'d Vec<DateTimeSpec>) -> Self {
         let mut freq = Freq::Daily;
         let mut interval = 1;
         let mut until = None;
@@ -190,7 +197,8 @@ impl RecurrenceHandler {
         let mut neg_byweekno = Vec::new();
         let mut neg_byyearday = Vec::new();
 
-        for part in raw.split(';') {
+        let clean_raw = raw.strip_prefix("RRULE:").unwrap_or(raw);
+        for part in clean_raw.split(';') {
             if let Some((key, val)) = part.split_once('=') {
                 match key {
                     "FREQ" => {
@@ -274,6 +282,10 @@ impl RecurrenceHandler {
             interval,
             until,
 
+            // R/EXDATES
+            rdates,
+            exdates,
+
             // Masks
             byday_mask,
             bymonth_mask,
@@ -297,6 +309,15 @@ impl RecurrenceHandler {
             }
         }
 
+        // RDATE and EXDATE check
+        let target_naive = target.date_naive();
+        if self.exdates.iter().any(|ex| ex.utc_time().date_naive() == target_naive) {
+            return false
+        }
+        if self.rdates.iter().any(|ex| ex.utc_time().date_naive() == target_naive) {
+            return true
+        }
+
         // Restraint check
         let has_day_constraints = self.byday_mask != 0
             || self.bymonthday_mask != 0
@@ -304,13 +325,31 @@ impl RecurrenceHandler {
             || !self.neg_byyearday.is_empty()
             || self.byyearday_mask.iter().any(|&m| m != 0);
 
+        // Restraint early return
+        if !has_day_constraints {
+            match self.freq {
+                Freq::Weekly => {
+                    if target.weekday() != dt_start.weekday() { return false}
+                },
+                Freq::Monthly => {
+                    if target.day() != dt_start.day() {
+                        return false
+                    }
+                }
+                Freq::Yearly => {
+                    if target.month() != dt_start.month() || target.day() != dt_start.day() {
+                        return false
+                    }
+                }
+                Freq::Daily => {}
+            }
+        }
+
         // BYDAY check
         if self.byday_mask != 0 {
             if !self.matches_day(target.weekday()) {
                 return false;
             }
-        } else if target.weekday() != dt_start.weekday() {
-            return false;
         }
 
         // BYMONTH check
@@ -404,30 +443,17 @@ impl RecurrenceHandler {
                 diff >= 0 && diff % self.interval == 0
             }
             Freq::Weekly => {
-                let s_monday = dt_start.date_naive().num_days_from_ce()
-                    - dt_start.weekday().num_days_from_monday() as i32;
-                let t_monday = target.date_naive().num_days_from_ce()
-                    - target.weekday().num_days_from_monday() as i32;
-                let weeks_since = (t_monday - s_monday) / 7;
-                weeks_since >= 0 && weeks_since as i64 % self.interval == 0
+                let s_monday = dt_start.date_naive().num_days_from_ce() - dt_start.weekday().num_days_from_monday() as i32;
+                let t_monday = target.date_naive().num_days_from_ce() - target.weekday().num_days_from_monday() as i32;
+                ((t_monday - s_monday) / 7) % self.interval as i32 == 0
             }
             Freq::Monthly => {
-                let months_since = (target.year() - dt_start.year()) * 12
-                    + (target.month() as i32 - dt_start.month() as i32);
-                let interval_ok = months_since >= 0 && months_since as i64 % self.interval == 0;
-
-                if !has_day_constraints {
-                    interval_ok && target.day() == dt_start.day()
-                } else {
-                    interval_ok
-                }
+                let months_since = (target.year() - dt_start.year()) * 12 + (target.month() as i32 - dt_start.month() as i32);
+                months_since >= 0 && months_since as i64 % self.interval == 0
             }
             Freq::Yearly => {
                 let years_since = target.year() - dt_start.year();
-                years_since >= 0
-                    && years_since as i64 % self.interval == 0
-                    && target.month() == dt_start.month()
-                    && target.day() == dt_start.day()
+                years_since >= 0 && years_since as i64 % self.interval == 0
             }
         }
     }
@@ -467,6 +493,7 @@ impl RecurrenceHandler {
     }
 }
 
+#[derive(Debug, PartialEq, Eq)]
 enum Freq {
     Daily,
     Weekly,
