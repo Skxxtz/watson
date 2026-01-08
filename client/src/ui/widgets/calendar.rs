@@ -474,7 +474,7 @@ fn draw_event(
         let cy = top + usable_height / 2.0;
         let cx = x + 10.0;
         CairoShapesExt::vert_centered_text(ctx, summary, cx, cy);
-        let cx = x + lane_width - 10.0;
+        let cx = x + lane_width - 45.0;
         CairoShapesExt::vert_centered_text(ctx, &time, cx, cy);
     } else {
         // Title
