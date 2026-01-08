@@ -1,10 +1,6 @@
-use std::{
-    cell::Cell,
-    collections::{HashMap, HashSet},
-    rc::Rc,
-};
+use std::{cell::Cell, sync::Arc};
 
-use chrono::{DateTime, Datelike, Duration, NaiveTime, TimeZone, Utc, Weekday};
+use chrono::{DateTime, Datelike, Duration, NaiveDate, NaiveTime, TimeZone, Utc, Weekday};
 use ical::parser::ical::component::IcalEvent;
 
 use crate::{
@@ -48,7 +44,7 @@ pub struct CalDavEvent {
     pub organizer: Option<String>,
     pub attendees: Vec<Attendee>,
 
-    pub calendar_info: Rc<CalendarInfo>,
+    pub calendar_info: Arc<CalendarInfo>,
 
     pub event_type: CalEventType,
 
@@ -141,18 +137,15 @@ impl CalDavEvent {
         let Some(start) = self.start.as_ref() else {
             return false;
         };
-
-        if self.summary.is_none() {
-            println!("{:?}", self);
-        }
-        // If the event is recurring, delegate
-        if self.recurrence.is_some() {
-            return self.handle_recurrence(day);
-        }
-
         // Compute start and end as UTC
         let start_utc = start.utc_time();
         let end_utc = self.end.as_ref().map(|e| e.utc_time()).unwrap_or(start_utc);
+
+        // If the event is recurring, delegate
+        if let Some(reccurence) = &self.recurrence {
+            let handler = RecurrenceHandler::from_raw(&reccurence.raw);
+            return handler.is_active_on(&start_utc, day);
+        }
 
         // Compare day ignoring time (assuming day is at midnight UTC)
         let day = day.date_naive();
@@ -162,194 +155,321 @@ impl CalDavEvent {
 
         start_utc <= day_end && end_utc >= day_start
     }
+}
 
-    fn handle_recurrence(&self, target: &DateTime<Utc>) -> bool {
-        let dt_start = match self.start.as_ref() {
-            Some(d) => d.utc_time(),
-            _ => return false,
-        };
-        let recurrence = match self.recurrence.as_ref() {
-            Some(r) => r,
-            _ => return false,
-        };
+pub struct RecurrenceHandler {
+    interval: i64,
+    freq: Freq,
+    until: Option<i64>,
 
-        // Gather all rules
-        let map: HashMap<String, String> = recurrence
-            .raw
-            .split(';')
-            .filter_map(|p| p.split_once('='))
-            .map(|(a, b)| (a.to_string(), b.to_string()))
-            .collect();
+    // Masks
+    byday_mask: u8,
+    bymonth_mask: u16,
+    bymonthday_mask: u32,
+    byweekno_mask: u64,
+    byyearday_mask: [u64; 6], // > 365
 
-        // Early return if same day
-        if *target == dt_start {
-            return true;
-        }
+    // Negs
+    neg_bymonthday: Vec<i8>,
+    neg_byweekno: Vec<i8>,
+    neg_byyearday: Vec<i16>,
+}
+impl RecurrenceHandler {
+    pub fn from_raw(raw: &str) -> Self {
+        let mut freq = Freq::Daily;
+        let mut interval = 1;
+        let mut until = None;
 
-        // If date is explicitely named, return true
-        if self.rdates.iter().any(|d| d.utc_time() == *target) {
-            return true;
-        }
-        // If date is explicitely named, return false
-        if self.exdates.iter().any(|d| d.utc_time() == *target) {
-            return false;
-        }
+        let mut byday_mask = 0;
+        let mut bymonth_mask = 0;
+        let mut bymonthday_mask = 0;
+        let mut byweekno_mask = 0;
+        let mut byyearday_mask = [0, 0, 0, 0, 0, 0];
 
-        // If rule does not apply anymore
-        if let Some(until) = map.get("UNTIL").and_then(|u| parse_until(u)) {
-            match until {
-                DateTimeSpec::Date(d) => {
-                    if target.date_naive() > d {
-                        return false;
+        let mut neg_bymonthday = Vec::new();
+        let mut neg_byweekno = Vec::new();
+        let mut neg_byyearday = Vec::new();
+
+        for part in raw.split(';') {
+            if let Some((key, val)) = part.split_once('=') {
+                match key {
+                    "FREQ" => {
+                        freq = match val {
+                            "WEEKLY" => Freq::Weekly,
+                            "MONTHLY" => Freq::Monthly,
+                            "YEARLY" => Freq::Yearly,
+                            _ => Freq::Daily,
+                        }
                     }
-                }
-                DateTimeSpec::DateTime { .. } => {
-                    let until_dt = until.utc_time();
-                    if *target > until_dt {
-                        return false;
+                    "INTERVAL" => interval = val.parse().unwrap_or(1),
+                    "BYDAY" => {
+                        for day_str in val.split(',') {
+                            byday_mask |= match day_str {
+                                "MO" => 1 << 0,
+                                "TU" => 1 << 1,
+                                "WE" => 1 << 2,
+                                "TH" => 1 << 3,
+                                "FR" => 1 << 4,
+                                "SA" => 1 << 5,
+                                "SU" => 1 << 6,
+                                _ => 0,
+                            }
+                        }
                     }
+                    "BYMONTH" => {
+                        for m_str in val.split(',') {
+                            if let Ok(m_num) = m_str.parse::<u32>() {
+                                // RFC 5545 months are 1-12
+                                if m_num >= 1 && m_num <= 12 {
+                                    bymonth_mask |= 1 << (m_num - 1);
+                                }
+                            }
+                        }
+                    }
+                    "BYMONTHDAY" => {
+                        for d in val.split(',') {
+                            if let Ok(day_num) = d.parse::<i32>() {
+                                if day_num >= 1 && day_num <= 31 {
+                                    bymonthday_mask |= 1 << (day_num - 1);
+                                } else if day_num <= -1 && day_num >= -31 {
+                                    neg_bymonthday.push(day_num as i8);
+                                }
+                            }
+                        }
+                    }
+                    "BYWEEKNO" => {
+                        for w_str in val.split(',') {
+                            if let Ok(w_num) = w_str.parse::<i32>() {
+                                if w_num >= 1 && w_num <= 53 {
+                                    byweekno_mask |= 1 << (w_num - 1);
+                                } else if w_num <= -1 && w_num >= -53 {
+                                    neg_byweekno.push(w_num as i8);
+                                }
+                            }
+                        }
+                    }
+                    "BYYEARDAY" => {
+                        for y_str in val.split(',') {
+                            if let Ok(y_num) = y_str.parse::<i32>() {
+                                if y_num >= 1 && y_num <= 366 {
+                                    let idx = ((y_num - 1) / 64) as usize;
+                                    let bit = (y_num - 1) % 64;
+                                    byyearday_mask[idx] |= 1 << bit;
+                                } else if y_num <= -1 && y_num >= -366 {
+                                    neg_byyearday.push(y_num as i16);
+                                }
+                            }
+                        }
+                    }
+
+                    "UNTIL" => until = parse_until(val).map(|u| u.utc_time().timestamp()),
+                    _ => {}
                 }
             }
         }
 
-        // Early return if BYDAY does not match
-        if let Some(by_day) = map.get("BYDAY") {
-            let allowed_days: HashSet<Weekday> = by_day
-                .split(',')
-                .map(|d| d.trim())
-                .filter_map(|d| match d {
-                    "MO" => Some(Weekday::Mon),
-                    "TU" => Some(Weekday::Tue),
-                    "WE" => Some(Weekday::Wed),
-                    "TH" => Some(Weekday::Thu),
-                    "FR" => Some(Weekday::Fri),
-                    "SA" => Some(Weekday::Sat),
-                    "SU" => Some(Weekday::Sun),
-                    _ => None,
-                })
-                .collect();
-            if allowed_days.is_empty() {
-                if target.weekday() != dt_start.weekday() {
+        Self {
+            // Core
+            freq,
+            interval,
+            until,
+
+            // Masks
+            byday_mask,
+            bymonth_mask,
+            bymonthday_mask,
+            byweekno_mask,
+            byyearday_mask,
+
+            // Negs
+            neg_bymonthday,
+            neg_byweekno,
+            neg_byyearday,
+        }
+    }
+
+    #[inline(always)]
+    pub fn is_active_on(&self, dt_start: &DateTime<Utc>, target: &DateTime<Utc>) -> bool {
+        // UNTIL early return
+        if let Some(u) = &self.until {
+            if target.timestamp() > *u {
+                return false;
+            }
+        }
+
+        // Restraint check
+        let has_day_constraints = self.byday_mask != 0
+            || self.bymonthday_mask != 0
+            || !self.neg_bymonthday.is_empty()
+            || !self.neg_byyearday.is_empty()
+            || self.byyearday_mask.iter().any(|&m| m != 0);
+
+        // BYDAY check
+        if self.byday_mask != 0 {
+            if !self.matches_day(target.weekday()) {
+                return false;
+            }
+        } else if target.weekday() != dt_start.weekday() {
+            return false;
+        }
+
+        // BYMONTH check
+        if self.bymonth_mask != 0 {
+            let month_bit = 1 << (target.month() - 1);
+            if (self.bymonth_mask & month_bit) == 0 {
+                return false;
+            }
+        }
+
+        // BYMONTHDAY Check
+        if self.bymonthday_mask != 0 || !self.neg_bymonthday.is_empty() {
+            let mut matches = false;
+
+            let day_bit = 1 << (target.day() - 1);
+            if (self.bymonthday_mask & day_bit) != 0 {
+                matches = true;
+            }
+
+            if !matches && !self.neg_bymonthday.is_empty() {
+                let total_days = last_day_of_month(target.year(), target.month()) as i32;
+                let target_neg = (target.day() as i32) - total_days - 1;
+
+                if self.neg_bymonthday.iter().any(|&d| d as i32 == target_neg) {
+                    matches = true;
+                }
+            }
+
+            if !matches {
+                return false;
+            }
+        }
+
+        // BYWEEKNO check
+        if self.byweekno_mask != 0 || !self.neg_byweekno.is_empty() {
+            let mut matches = false;
+            let week_obj = target.iso_week();
+            let w_num = week_obj.week();
+
+            if (self.byweekno_mask & (1 << (w_num - 1))) != 0 {
+                matches = true;
+            }
+
+            if !matches && !self.neg_byweekno.is_empty() {
+                let total_weeks = Self::weeks_in_year(week_obj.year());
+                let w_neg = (w_num as i32) - (total_weeks as i32) - 1;
+
+                if self.neg_byweekno.iter().any(|&w| w as i32 == w_neg) {
+                    matches = true;
+                }
+
+                if !matches {
                     return false;
                 }
             }
-            if !allowed_days.contains(&target.weekday()) {
-                return false;
+        }
+
+        if !self.neg_byyearday.is_empty() || self.byyearday_mask.iter().any(|&m| m != 0) {
+            let mut matches = false;
+
+            let y_day = target.ordinal();
+
+            let idx = ((y_day - 1) / 64) as usize;
+            let bit = (y_day - 1) % 64;
+            if self.byyearday_mask[idx] & (1 << bit) != 0 {
+                matches = true;
+            }
+
+            if !matches && !self.neg_byyearday.is_empty() {
+                let total_year_days = if Self::is_leap_year(target.year()) {
+                    366
+                } else {
+                    365
+                };
+
+                let y_neg = (y_day as i32) - total_year_days - 1;
+                if self.neg_byyearday.iter().any(|&d| d as i32 == y_neg) {
+                    matches = true;
+                }
+
+                if !matches {
+                    return false;
+                }
             }
         }
 
-        // Early return if BYMONTHDAY is not true
-        if let Some(bymonthday) = map.get("BYMONTHDAY") {
-            let day = target.day();
-            let last = last_day_of_month(target.year(), target.month());
-
-            let bymonth_matches = bymonthday
-                .split(',')
-                .filter_map(|d| d.parse::<i32>().ok())
-                .any(|d| {
-                    if d > 0 && d as u32 == day {
-                        true
-                    } else if d < 0 && last as i32 + d == day as i32 {
-                        true
-                    } else {
-                        false
-                    }
-                });
-
-            if !bymonth_matches {
-                return false;
+        // Frequency Interval Logic
+        match self.freq {
+            Freq::Daily => {
+                let diff = (target.date_naive() - dt_start.date_naive()).num_days();
+                diff >= 0 && diff % self.interval == 0
             }
-        }
-
-        // Early return if BYWEEKNO is not true
-        if let Some(byweekno) = map.get("BYWEEKNO") {
-            let weekno = target.iso_week().week();
-            let byweekno_matches = byweekno
-                .split(',')
-                .filter_map(|d| d.parse::<u32>().ok())
-                .any(|d| weekno == d);
-            if !byweekno_matches {
-                return false;
+            Freq::Weekly => {
+                let s_monday = dt_start.date_naive().num_days_from_ce()
+                    - dt_start.weekday().num_days_from_monday() as i32;
+                let t_monday = target.date_naive().num_days_from_ce()
+                    - target.weekday().num_days_from_monday() as i32;
+                let weeks_since = (t_monday - s_monday) / 7;
+                weeks_since >= 0 && weeks_since as i64 % self.interval == 0
             }
-        }
+            Freq::Monthly => {
+                let months_since = (target.year() - dt_start.year()) * 12
+                    + (target.month() as i32 - dt_start.month() as i32);
+                let interval_ok = months_since >= 0 && months_since as i64 % self.interval == 0;
 
-        // Early return if BYMONTH is not true
-        if let Some(bymonth) = map.get("BYMONTH") {
-            let month = target.month();
-            let bymonth_matches = bymonth
-                .split(',')
-                .filter_map(|d| d.parse::<u32>().ok())
-                .any(|d| d == month);
-
-            if !bymonth_matches {
-                return false;
-            }
-        }
-
-        // Check if frequency matches
-        if let Some(freq) = map.get("FREQ") {
-            let interval = map
-                .get("INTERVAL")
-                .and_then(|i| i.parse::<i64>().ok())
-                .unwrap_or(1);
-            let delta_time = *target - dt_start;
-
-            // Check invalid time since
-            let num_days = delta_time.num_days();
-            if num_days == 0 {
-                return true;
-            } else if num_days < 0 {
-                return false;
-            }
-
-            match freq.as_str() {
-                "SECONDLY" | "MINUTELY" | "HOURLY" => {
-                    return false; // No support yet, maybe in the future
+                if !has_day_constraints {
+                    interval_ok && target.day() == dt_start.day()
+                } else {
+                    interval_ok
                 }
-
-                "DAILY" => return num_days % interval == 0,
-                "WEEKLY" => {
-                    // Early return if day does not match
-                    if map.get("BYDAY").is_some() {
-                        if target.weekday() != dt_start.weekday() {
-                            return false;
-                        }
-                    }
-
-                    let days = (target.date_naive() - dt_start.date_naive()).num_days();
-                    if days < 0 {
-                        return false;
-                    }
-
-                    if days % 7 != 0 {
-                        return false;
-                    }
-
-                    let weeks_since = days / 7;
-                    return (weeks_since as i64) % interval == 0;
-                }
-                "MONTHLY" => {
-                    let months_since = (target.year() - dt_start.year()) * 12
-                        + (target.month() - dt_start.month()) as i32;
-
-                    if map.get("BYMONTHDAY").is_none() {
-                        if target.day() != dt_start.day() {
-                            return false;
-                        }
-                    }
-
-                    return months_since as i64 % interval == 0;
-                }
-                "YEARLY" => {
-                    let months_since = (target.year() - dt_start.year()) * 12
-                        + (target.month() - dt_start.month()) as i32;
-
-                    return months_since as i64 % (interval * 12) == 0;
-                }
-                _ => return false,
             }
-        } else {
-            return false;
+            Freq::Yearly => {
+                let years_since = target.year() - dt_start.year();
+                years_since >= 0
+                    && years_since as i64 % self.interval == 0
+                    && target.month() == dt_start.month()
+                    && target.day() == dt_start.day()
+            }
         }
     }
+
+    #[inline(always)]
+    fn weekday_to_mask(wd: Weekday) -> u8 {
+        // Sets 1 at index of u8
+        // 1 << 0 => 00000001 Monday
+        // 1 << 3 => 00001000 Thursday
+        1 << (wd.num_days_from_monday())
+    }
+    #[inline(always)]
+    fn matches_day(&self, day: Weekday) -> bool {
+        // Bitwise check:
+        //   00000101  (Mask for MO and WE)
+        // & 00000010  (Bit for Tuesday)
+        // ----------
+        //   00000000  (Result is 0) -> FALSE
+        //
+        //   00000101  (Mask for MO and WE)
+        // & 00000100  (Bit for Wednesday)
+        // ----------
+        //   00000100  (Result is 4, which is != 0) -> TRUE
+
+        (self.byday_mask & Self::weekday_to_mask(day)) != 0
+    }
+    #[inline(always)]
+    fn weeks_in_year(iso_year: i32) -> u32 {
+        NaiveDate::from_ymd_opt(iso_year, 12, 28)
+            .unwrap()
+            .iso_week()
+            .week()
+    }
+    #[inline(always)]
+    fn is_leap_year(year: i32) -> bool {
+        (year % 4 == 0 && year % 100 != 0) || (year % 400 == 0)
+    }
+}
+
+enum Freq {
+    Daily,
+    Weekly,
+    Monthly,
+    Yearly,
 }

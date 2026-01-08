@@ -1,5 +1,7 @@
 use std::io::{Read, StdinLock, Write, stdin, stdout};
 
+use strum::IntoEnumIterator;
+
 use crate::{
     auth::{
         Credential, CredentialData, CredentialManager, CredentialService,
@@ -298,7 +300,7 @@ fn render_new_account(s: &NewAccountState) {
     }
 
     match s.field {
-        AccountField::Service if s.service.is_empty() => {
+        AccountField::Service if s.service.is_none() => {
             println!("\nEnter: choose service • Esc: cancel");
         }
         _ => {
@@ -416,7 +418,9 @@ fn update_service_selection(
 ) -> Option<UiState> {
     match input {
         Input::Up if state.selected > 0 => state.selected -= 1,
-        Input::Down | Input::Tab if state.selected < CredentialService::LEN - 1 => {
+        Input::Down | Input::Tab
+            if state.selected < CredentialService::available_services().count() - 1 =>
+        {
             state.selected += 1
         }
         Input::Enter => {
@@ -426,7 +430,8 @@ fn update_service_selection(
                     match &mut current.data {
                         CredentialData::Password { username, secret } => {
                             println!("{} - {} - {}", secret, username, current.label);
-                            current.service = CredentialService::itos(state.selected);
+                            current.service = CredentialService::from_repr(state.selected + 1)
+                                .unwrap_or_default();
                             UiState::Edit(EditState {
                                 field: AccountField::Service,
                                 cred: state.cred_index.unwrap(),
@@ -439,7 +444,8 @@ fn update_service_selection(
                     }
                 }
                 ServiceReturnTarget::NewAccount => {
-                    let service = CredentialService::itos(state.selected);
+                    let service =
+                        CredentialService::from_repr(state.selected + 1).unwrap_or_default();
                     let data = match &service {
                         CredentialService::Google => CredentialData::OAuth {
                             service: service.clone(),
@@ -471,7 +477,7 @@ fn update_service_selection(
 fn render_service_selection(state: &mut ServiceSelectState) {
     clear();
     println!("Select a service:\n");
-    for (i, label) in CredentialService::ALL.iter().enumerate() {
+    for (i, label) in CredentialService::iter().skip(1).enumerate() {
         if i == state.selected {
             println!("> {}", label);
         } else {
@@ -650,7 +656,7 @@ fn render_edit(s: &EditState, manager: &mut CredentialManager) {
     );
 
     match s.field {
-        AccountField::Service if cred.service.is_empty() => {
+        AccountField::Service if cred.service.is_none() => {
             println!("\nEnter: change service • Esc: cancel");
         }
         _ => {

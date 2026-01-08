@@ -1,5 +1,6 @@
-use std::{cell::Cell, rc::Rc};
+use std::{cell::Cell, sync::Arc};
 
+use async_trait::async_trait;
 use chrono::{DateTime, FixedOffset, NaiveDate, Utc};
 use reqwest::Client;
 use serde::Deserialize;
@@ -8,6 +9,7 @@ use crate::{
     auth::{Credential, CredentialData},
     calendar::{
         google::auth::GoogleAuth,
+        protocol::CalendarProvider,
         utils::{
             CalDavEvent, CalEventType, CalendarInfo,
             structs::{Attendee, DateTimeSpec, RecurrenceRule},
@@ -85,7 +87,7 @@ pub struct GoogleCalendarEvent {
     pub attendees: Option<Vec<GoogleEventUser>>,
 }
 impl GoogleCalendarEvent {
-    fn to_cal_dav_event(self, calendar_info: Rc<CalendarInfo>) -> CalDavEvent {
+    fn to_cal_dav_event(self, calendar_info: Arc<CalendarInfo>) -> CalDavEvent {
         let start = self.start.map(|v| v.into());
         let end = self.end.map(|v| v.into());
         let event_type = match (start.as_ref(), end.as_ref()) {
@@ -178,13 +180,19 @@ pub struct GoogleCalendarClient {
     client: Client,
     credential: Credential,
 }
-
 impl GoogleCalendarClient {
     pub fn new(credential: Credential) -> Self {
         Self {
             client: Client::new(),
             credential,
         }
+    }
+}
+
+#[async_trait]
+impl CalendarProvider for GoogleCalendarClient {
+    async fn init(&mut self) -> Result<(), WatsonError> {
+        Ok(())
     }
     async fn refresh(&mut self) -> Result<(), WatsonError> {
         if let CredentialData::OAuth {
@@ -204,7 +212,7 @@ impl GoogleCalendarClient {
         Ok(())
     }
 
-    pub async fn get_calendars(&mut self) -> Result<Vec<CalendarInfo>, WatsonError> {
+    async fn get_calendars(&mut self) -> Result<Vec<CalendarInfo>, WatsonError> {
         self.refresh().await?;
 
         let CredentialData::OAuth { access_token, .. } = &self.credential.data else {
@@ -244,7 +252,7 @@ impl GoogleCalendarClient {
         Ok(list.items.into_iter().map(|i| i.into()).collect())
     }
 
-    pub async fn get_events(
+    async fn get_events(
         &mut self,
         calendars: Vec<CalendarInfo>,
     ) -> Result<Vec<CalDavEvent>, WatsonError> {
@@ -283,7 +291,7 @@ impl GoogleCalendarClient {
                 continue;
             }
 
-            let calendar_rc = Rc::new(calendar);
+            let calendar_rc = Arc::new(calendar);
             let tmp_events: Vec<CalDavEvent> =
                 serde_json::from_str::<GoogleCalendarEventList>(&text)
                     .map_err(|e| watson_err!(WatsonErrorKind::Deserialization, e.to_string()))?

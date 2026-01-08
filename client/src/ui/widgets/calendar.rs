@@ -14,12 +14,8 @@ use gtk4::{
 
 use crate::ui::widgets::utils::{CairoShapesExt, Rgba};
 use common::{
-    auth::{CredentialData, CredentialManager},
-    calendar::{
-        google::GoogleCalendarClient,
-        icloud::PropfindInterface,
-        utils::{CalDavEvent, CalEventType},
-    },
+    auth::CredentialManager,
+    calendar::utils::{CalDavEvent, CalEventType},
 };
 
 struct CalendarContext {
@@ -138,72 +134,65 @@ impl Calendar {
                 }
 
                 for account in credential_manager.credentials {
-                    let evs = match account.data {
-                        CredentialData::OAuth { .. } => {
-                            let mut client = GoogleCalendarClient::new(account);
-                            let calendars = match client.get_calendars().await {
-                                Ok(v) => v,
-                                Err(e) => {
-                                    println!("{:?}", e);
-                                    return;
-                                }
-                            };
-                            client.get_events(calendars).await
+                    let Some(mut provider) = account.provider() else {
+                        continue;
+                    };
+
+                    if let Err(e) = provider.init().await {
+                        // TODO: Log err
+                        eprintln!("{:?}", e);
+                        continue;
+                    }
+
+                    let calendars = match provider.get_calendars().await {
+                        Ok(v) => v,
+                        Err(e) => {
+                            // TODO: Log err
+                            eprintln!("{:?}", e);
+                            continue;
                         }
-                        CredentialData::Password { .. } => {
-                            let mut interface = PropfindInterface::new(account);
-                            match interface.get_principal().await {
-                                Ok(_) => match interface.get_calendars().await {
-                                    Ok(calendar_info) => interface.get_events(calendar_info).await,
-                                    Err(e) => {
-                                        eprintln!("Failed to fetch calendars: {:?}", e);
-                                        continue;
-                                    }
-                                },
-                                Err(e) => {
-                                    eprintln!("Failed to get principal: {:?}", e);
-                                    continue;
-                                }
-                            }
+                    };
+
+                    let mut events = match provider.get_events(calendars).await {
+                        Ok(v) => v,
+                        Err(e) => {
+                            // TODO: Log err
+                            eprintln!("{:?}", e);
+                            continue;
                         }
-                        CredentialData::Empty => continue,
                     };
 
                     // Filter events
-                    match evs {
-                        Ok(mut evs) => {
-                            let today = Local::now().to_utc();
-
-                            if let WidgetSpec::Calendar { selection, .. } = specs.as_ref() {
-                                evs.retain(|e| {
-                                    selection
-                                        .as_ref()
-                                        .map_or(true, |s| s.is_allowed(&e.calendar_info.name))
-                                        && e.occurs_on_day(&today)
-                                });
-                            } else {
-                                evs.retain(|e| e.occurs_on_day(&today));
-                            }
-
-                            let mut timed = Vec::new();
-                            let mut allday = Vec::new();
-                            for item in evs {
-                                match item.event_type {
-                                    CalEventType::Timed => timed.push(item),
-                                    CalEventType::AllDay => allday.push(item),
-                                }
-                            }
-                            events_timed.borrow_mut().extend(timed);
-                            events_allday.borrow_mut().extend(allday);
-
-                            // Internally ques draw
-                            state.start(AnimationDirection::Forward {
-                                duration: 0.7,
-                                function: EaseFunction::EaseOutCubic,
-                            });
-                        }
-                        Err(e) => eprintln!("Failed to fetch events: {:?}", e),
+                    let today = Local::now().to_utc();
+                    if let WidgetSpec::Calendar { selection, .. } = specs.as_ref() {
+                        events.retain(|e| {
+                            selection
+                                .as_ref()
+                                .map_or(true, |s| s.is_allowed(&e.calendar_info.name))
+                                && e.occurs_on_day(&today)
+                        });
+                    } else {
+                        events.retain(|e| e.occurs_on_day(&today));
                     }
+
+                    // Extend the Events
+                    {
+                        let mut timed_borrow = events_timed.borrow_mut();
+                        let mut allday_borrow = events_allday.borrow_mut();
+
+                        for item in events {
+                            match item.event_type {
+                                CalEventType::Timed => timed_borrow.push(item),
+                                CalEventType::AllDay => allday_borrow.push(item),
+                            }
+                        }
+                    }
+
+                    // Internally ques draw
+                    state.start(AnimationDirection::Forward {
+                        duration: 0.7,
+                        function: EaseFunction::EaseOutCubic,
+                    });
                 }
             }
         });

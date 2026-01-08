@@ -6,6 +6,7 @@ use std::{
     os::unix::fs::OpenOptionsExt,
     path::PathBuf,
 };
+use strum::{Display as EnumDisplay, EnumCount, EnumIter, FromRepr, IntoEnumIterator};
 use zeroize::{Zeroize, ZeroizeOnDrop};
 
 use base64::{Engine, engine::general_purpose};
@@ -17,6 +18,9 @@ use chacha20poly1305::{
 };
 
 use crate::{
+    calendar::{
+        google::GoogleCalendarClient, icloud::ICloudCalendarClient, protocol::CalendarProvider,
+    },
     errors::{WatsonError, WatsonErrorKind},
     watson_err,
 };
@@ -367,6 +371,13 @@ impl Credential {
 
         manager.save()
     }
+    pub fn provider(self) -> Option<Box<dyn CalendarProvider>> {
+        match self.service {
+            CredentialService::None => None,
+            CredentialService::Icloud => Some(Box::new(ICloudCalendarClient::new(self))),
+            CredentialService::Google => Some(Box::new(GoogleCalendarClient::new(self))),
+        }
+    }
 }
 
 impl TryFrom<CredentialSerde> for Credential {
@@ -382,39 +393,26 @@ impl TryFrom<CredentialSerde> for Credential {
     }
 }
 // -------- Service ------------
-#[derive(Debug, Clone, Copy, Deserialize, Serialize)]
+#[derive(
+    Default, Debug, Clone, Copy, Deserialize, Serialize, EnumDisplay, EnumIter, EnumCount, FromRepr,
+)]
 pub enum CredentialService {
-    Icloud,
-    Google,
+    #[default]
+    #[strum(serialize = "")]
     None,
+
+    #[strum(serialize = "iCloud")]
+    Icloud,
+
+    #[strum(serialize = "Google")]
+    Google,
 }
 impl CredentialService {
-    pub const LEN: usize = 2;
-    pub const ALL: [Self; 2] = [Self::Icloud, Self::Google];
-    pub fn itos(index: usize) -> Self {
-        match index {
-            0 => Self::Icloud,
-            1 => Self::Google,
-            _ => Self::None,
-        }
+    pub fn available_services() -> impl Iterator<Item = Self> {
+        Self::iter().filter(|s| !s.is_none())
     }
-    pub fn is_empty(&self) -> bool {
+    pub fn is_none(&self) -> bool {
         matches!(self, Self::None)
-    }
-}
-impl Default for CredentialService {
-    fn default() -> Self {
-        Self::None
-    }
-}
-impl Display for CredentialService {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        let st = match self {
-            Self::Icloud => "ICloud",
-            Self::Google => "Google",
-            Self::None => "",
-        };
-        write!(f, "{}", st)
     }
 }
 

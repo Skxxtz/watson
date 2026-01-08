@@ -1,5 +1,5 @@
 use super::structs::*;
-use chrono::{DateTime, Datelike, NaiveDate, Utc};
+use chrono::{DateTime, Datelike, NaiveDate, NaiveDateTime, Utc};
 
 pub fn last_day_of_month(year: i32, month: u32) -> u32 {
     // Handle December specially
@@ -21,23 +21,22 @@ pub fn last_day_of_month(year: i32, month: u32) -> u32 {
 
 pub fn parse_until(s: &str) -> Option<DateTimeSpec> {
     if s.len() == 8 {
-        // YYYYMMDD -> date-only
         NaiveDate::parse_from_str(s, "%Y%m%d")
             .ok()
             .map(DateTimeSpec::Date)
     } else if s.ends_with('Z') {
-        // UTC datetime
-        DateTime::parse_from_str(s, "%Y%m%dT%H%M%SZ")
+        // UTC time: Parse naive then assign UTC
+        NaiveDateTime::parse_from_str(s, "%Y%m%dT%H%M%SZ")
             .ok()
             .map(|dt| DateTimeSpec::DateTime {
-                value: dt.with_timezone(&Utc),
+                value: dt.and_utc(),
             })
     } else {
-        // naive/floating datetime
-        DateTime::parse_from_str(s, "%Y%m%dT%H%M%S")
+        // Floating time: RFC 5545 says this should be treated as local time.
+        NaiveDateTime::parse_from_str(s, "%Y%m%dT%H%M%S")
             .ok()
             .map(|dt| DateTimeSpec::DateTime {
-                value: dt.with_timezone(&Utc),
+                value: dt.and_utc(), // Or .and_local_timezone(...).unwrap()
             })
     }
 }

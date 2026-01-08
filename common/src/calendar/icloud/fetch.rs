@@ -1,6 +1,6 @@
-use std::{collections::HashMap, io::Cursor, rc::Rc};
+use std::{collections::HashMap, sync::Arc};
 
-use ical::IcalParser;
+use async_trait::async_trait;
 use quick_xml::{Reader, events::Event};
 use reqwest::{
     Client,
@@ -10,32 +10,25 @@ use reqwest::{
 use crate::{
     auth::{Credential, CredentialData},
     calendar::{
-        icloud::protocol::PropfindRequest,
+        icloud::{
+            protocol::PropfindRequest,
+            utils::{parse_ical, unfold_ics},
+        },
+        protocol::CalendarProvider,
         utils::{CalDavEvent, CalendarInfo},
     },
     errors::{WatsonError, WatsonErrorKind},
     watson_err,
 };
 
-// Go to icloud.com
-// Signin
-// Click your profile picture
-// Click "Manage Apple Account →"
-// Go to "Sign-In and Security"
-// Click "App-Specific Passwords"
-// Create a new password (name it watson or so)
-//
-
-pub struct PropfindInterface {
+pub struct ICloudCalendarClient {
     client: Client,
     headers: HeaderMap,
     data: CredentialData,
     principal: Option<String>,
 }
-impl PropfindInterface {
-    pub fn new(credential: Credential) -> Self {
-        let Credential { data, .. } = credential;
-
+impl Default for ICloudCalendarClient {
+    fn default() -> Self {
         let client = Client::new();
 
         let mut headers = HeaderMap::new();
@@ -47,9 +40,18 @@ impl PropfindInterface {
         Self {
             client,
             headers,
-            data,
+            data: CredentialData::Empty,
             principal: None,
         }
+    }
+}
+impl ICloudCalendarClient {
+    pub fn new(credential: Credential) -> Self {
+        let mut obj = Self::default();
+        let Credential { data, .. } = credential;
+
+        obj.data = data;
+        obj
     }
     pub async fn make_request(&mut self, request: PropfindRequest) -> Result<String, WatsonError> {
         let mut headers = self.headers.clone();
@@ -138,7 +140,17 @@ impl PropfindInterface {
         }
         Ok(())
     }
-    pub async fn get_calendars(&mut self) -> Result<Vec<CalendarInfo>, WatsonError> {
+}
+
+#[async_trait]
+impl CalendarProvider for ICloudCalendarClient {
+    async fn init(&mut self) -> Result<(), WatsonError> {
+        self.get_principal().await
+    }
+    async fn refresh(&mut self) -> Result<(), WatsonError> {
+        Ok(())
+    }
+    async fn get_calendars(&mut self) -> Result<Vec<CalendarInfo>, WatsonError> {
         let Some(principal) = &self.principal else {
             return Err(watson_err!(
                 WatsonErrorKind::UndefinedAttribute,
@@ -206,7 +218,7 @@ impl PropfindInterface {
         Ok(calendars)
     }
 
-    pub async fn get_events(
+    async fn get_events(
         &mut self,
         calendar_info: Vec<CalendarInfo>,
     ) -> Result<Vec<CalDavEvent>, WatsonError> {
@@ -215,7 +227,7 @@ impl PropfindInterface {
             let request = PropfindRequest::Events {
                 url: info.href.clone(),
             };
-            let info = Rc::new(info);
+            let info = Arc::new(info);
             let text = self.make_request(request).await?;
 
             let mut reader = Reader::from_str(&text);
@@ -258,61 +270,4 @@ impl PropfindInterface {
 
         Ok(out)
     }
-}
-
-fn unfold_ics(input: &str) -> String {
-    let mut out = String::with_capacity(input.len());
-    let mut chars = input.chars().peekable();
-
-    while let Some(c) = chars.next() {
-        if c == '\r' {
-            if chars.peek() == Some(&'\n') {
-                chars.next();
-            }
-
-            match chars.peek() {
-                Some(' ') | Some('\t') => {
-                    chars.next(); // swallow folding whitespace
-                }
-                _ => out.push('\n'),
-            }
-        } else if c == '\n' {
-            match chars.peek() {
-                Some(' ') | Some('\t') => {
-                    chars.next(); // swallow folding whitespace
-                }
-                _ => out.push('\n'),
-            }
-        } else {
-            out.push(c);
-        }
-    }
-
-    out
-}
-
-fn parse_ical(ics: String, calendar_info: Rc<CalendarInfo>) -> Vec<CalDavEvent> {
-    let parser = IcalParser::new(Cursor::new(&ics));
-    let mut out = Vec::new();
-
-    for calendar in parser {
-        let calendar = match calendar {
-            Ok(c) => c,
-            Err(_) => continue,
-        };
-
-        for event in calendar.events {
-            match CalDavEvent::try_from(event) {
-                Ok(mut ev) => {
-                    ev.calendar_info = calendar_info.clone();
-                    out.push(ev);
-                }
-                Err(e) => {
-                    eprint!("{:?}", e)
-                }
-            }
-        }
-    }
-
-    out
 }
