@@ -5,24 +5,44 @@ use std::{
 
 use serde::{Deserialize, Serialize};
 
-use crate::notification::Notification;
+use crate::{errors::{WatsonError, WatsonErrorKind}, notification::Notification, watson_err};
 
 pub struct SocketData;
 impl SocketData {
     pub const SOCKET_ADDR: &'static str = "/tmp/watson.sock";
 }
 
-#[derive(Clone, Copy, Debug, Serialize, Deserialize)]
+#[derive(Clone, Copy, Debug, Serialize, Deserialize, PartialEq)]
 pub enum BatteryState {
     Charging,
     Discharging,
     Full,
     Invalid,
 }
+impl BatteryState {
+    pub fn capacity() -> Result<u32, WatsonError> {
+        let capacity_path = "/sys/class/power_supply/BAT0/capacity";
+        let capacity = {
+            let capacity_opt = std::fs::read_to_string(capacity_path)
+                .expect("Failed to read capacity")
+                .trim()
+                .parse::<u32>();
+
+            match capacity_opt {
+                Ok(c) => c,
+                Err(e) => return Err(watson_err!(WatsonErrorKind::Deserialization, e.to_string())),
+            }
+        };
+        Ok(capacity)
+    }
+}
 
 #[derive(Clone, Copy, Debug, Serialize, Deserialize)]
 pub enum InternalMessage {
-    BatteryState(BatteryState),
+    BatteryState{
+        state: BatteryState,
+        percentage: u32,
+    },
     Notification(u32),
 }
 
@@ -34,7 +54,10 @@ pub enum Response {
     Status { running: bool, silent: bool },
     Notification(Option<Notification>),
     Notifications(Vec<Notification>),
-    BatteryStateChange(BatteryState),
+    BatteryStateChange {
+        state: BatteryState,
+        percentage: u32,
+    },
 }
 
 #[derive(Deserialize, Serialize, Debug, Clone)]

@@ -50,8 +50,8 @@ async fn dbus_listener(daemon: Arc<RwLock<NotificationDaemon>>) -> zbus::Result<
 
     Ok(())
 }
+
 async fn battery_state_listener(sender: broadcast::Sender<InternalMessage>) -> zbus::Result<()> {
-    // Connect to session bus
     let conn = Connection::system().await?;
     let proxy = zbus::Proxy::new(
         &conn,
@@ -61,10 +61,12 @@ async fn battery_state_listener(sender: broadcast::Sender<InternalMessage>) -> z
     )
     .await?;
 
-    // Create Stream
     let mut stream = proxy.receive_signal("PropertiesChanged").await?;
 
-    // Listen to events
+    // Cache to prevent redundant updates
+    let mut last_state = BatteryState::Invalid;
+    let mut last_percentage = BatteryState::capacity().ok();
+
     while let Some(signal) = stream.next().await {
         let (iface, changed, _): (String, HashMap<String, OwnedValue>, Vec<String>) =
             signal.body().deserialize()?;
@@ -73,15 +75,38 @@ async fn battery_state_listener(sender: broadcast::Sender<InternalMessage>) -> z
             continue;
         }
 
-        if let Some(v) = changed.get("State") {
-            let state: u32 = v.try_into()?;
-            let state = match state {
+        let new_state_raw = changed
+            .get("State")
+            .and_then(|v| TryInto::<u32>::try_into(v).ok());
+        let new_perc_raw = changed
+            .get("Percentage")
+            .and_then(|v| TryInto::<f64>::try_into(v).ok());
+
+        let mut changed_significantly = false;
+        if let Some(s) = new_state_raw {
+            let state = match s {
                 1 => BatteryState::Charging,
                 2 => BatteryState::Discharging,
                 3 => BatteryState::Full,
                 _ => BatteryState::Invalid,
             };
-            let _ = sender.send(InternalMessage::BatteryState(state));
+            if state != last_state {
+                last_state = state;
+                changed_significantly = true;
+            }
+        }
+        if new_perc_raw.is_some() {
+            last_percentage = new_state_raw.map(|i| i as u32);
+        }
+
+        // Check for changes
+        if let Some(percentage) = last_percentage {
+            if changed_significantly && last_state != BatteryState::Invalid {
+                let _ = sender.send(InternalMessage::BatteryState {
+                    state: last_state,
+                    percentage,
+                });
+            }
         }
     }
     Ok(())
@@ -128,8 +153,9 @@ async fn handle_client(
                         let daemon = daemon.read().await;
                         Response::Notification(daemon.get_by_id(id).cloned())
                     }
-                    InternalMessage::BatteryState(state) => {
-                        Response::BatteryStateChange(state)
+                    InternalMessage::BatteryState { state, percentage } => Response::BatteryStateChange {
+                        state,
+                        percentage
                     }
                 };
 

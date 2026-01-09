@@ -25,14 +25,11 @@ impl Battery {
     pub fn poll_state(&self) {
         self.status.set(BatteryStatus::poll());
     }
-    pub fn update_state(&self, state: BatteryState) {
-        let status = match BatteryStatus::capacity() {
-            Ok(c) => match state {
-                BatteryState::Full => BatteryStatus::Full(c),
-                BatteryState::Charging => BatteryStatus::Charging(c),
-                BatteryState::Discharging => BatteryStatus::Discharging(c),
-                _ => BatteryStatus::Invalid,
-            },
+    pub fn update_state(&self, state: BatteryState, percentage: u32) {
+        let status = match state {
+            BatteryState::Full => BatteryStatus::Full(percentage),
+            BatteryState::Charging => BatteryStatus::Charging(percentage),
+            BatteryState::Discharging => BatteryStatus::Discharging(percentage),
             _ => BatteryStatus::Invalid,
         };
         self.status.set(status)

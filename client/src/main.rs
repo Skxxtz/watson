@@ -6,7 +6,8 @@ use crate::{
     ui::{
         WatsonUi,
         widgets::{
-            Battery, BatteryBuilder, Calendar, Clock, NotificationCentre, NotificationCentreBuilder,
+            Battery, BatteryBuilder, Button, ButtonBuilder, ButtonFunc, Calendar, Clock,
+            NotificationCentre, NotificationCentreBuilder,
         },
     },
 };
@@ -22,7 +23,7 @@ use gtk4::{
         prelude::{ApplicationExt, ApplicationExtManual},
     },
     glib::{WeakRef, object::ObjectExt, subclass::types::ObjectSubclassIsExt},
-    prelude::{BoxExt, GtkWindowExt, WidgetExt},
+    prelude::{BoxExt, GtkWindowExt, WidgetExt}
 };
 use tokio::sync::broadcast;
 
@@ -81,9 +82,9 @@ async fn main() {
                     while let Ok(buf) = rx.recv().await {
                         match serde_json::from_slice::<Response>(&buf) {
                             Ok(b) => match b {
-                                Response::BatteryStateChange(s) => {
+                                Response::BatteryStateChange { state: s, percentage: p} => {
                                     state.borrow().batteries().for_each(|bat| {
-                                        bat.update_state(s);
+                                        bat.update_state(s, p);
                                         bat.queue_draw();
                                     });
                                 }
@@ -146,6 +147,10 @@ fn create_widgets(viewport: &Box, spec: WidgetSpec, state: Rc<RefCell<UiState>>)
                 .borrow_mut()
                 .widgets
                 .push(WatsonWidget::NoticationCentre(notification_centre));
+        }
+        WidgetSpec::Button { .. } => {
+            let button = ButtonBuilder::new(&spec).for_box(&viewport).build();
+            state.borrow_mut().widgets.push(WatsonWidget::Button(button));
         }
         WidgetSpec::Column {
             base,
@@ -247,6 +252,7 @@ pub enum WatsonWidget {
     Calendar(WeakRef<DrawingArea>),
     Clock(WeakRef<DrawingArea>),
     NoticationCentre(NotificationCentre),
+    Button(Button),
 }
 impl WatsonWidget {
     pub fn widget_type(&self) -> WatsonWidgetType {
@@ -255,6 +261,7 @@ impl WatsonWidget {
             Self::Calendar(_) => WatsonWidgetType::Calendar,
             Self::Clock(_) => WatsonWidgetType::Clock,
             Self::NoticationCentre(_) => WatsonWidgetType::NotificationCentre,
+            Self::Button(_) => WatsonWidgetType::Button,
         }
     }
 }
@@ -264,9 +271,11 @@ pub enum WatsonWidgetType {
     Calendar,
     Clock,
     NotificationCentre,
+    Button,
 }
 
-struct UiState {
+#[derive(Default)]
+pub struct UiState {
     widgets: Vec<WatsonWidget>,
 }
 #[allow(dead_code)]
@@ -311,6 +320,18 @@ impl UiState {
                 None
             }
         })
+    }
+    pub fn button(&self, func: ButtonFunc) -> impl Iterator<Item = &Button> {
+        self.widgets
+            .iter()
+            .filter_map(|w| {
+                if let WatsonWidget::Button(b) = w {
+                    Some(b)
+                } else {
+                    None
+                }
+            })
+            .filter(move |b| b.func == func)
     }
 }
 
