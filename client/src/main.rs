@@ -7,7 +7,7 @@ use crate::{
         WatsonUi,
         widgets::{
             Battery, BatteryBuilder, Button, ButtonBuilder, ButtonFunc, Calendar, Clock,
-            NotificationCentre, NotificationCentreBuilder,
+            NotificationCentre, NotificationCentreBuilder, Slider, SliderBuilder,
         },
     },
 };
@@ -16,14 +16,14 @@ use common::{
     tokio::AsyncSizedMessage,
 };
 use gtk4::{
-    Application, Box, CssProvider, DrawingArea,
+    Application, Box, CssProvider, DrawingArea, Separator,
     gdk::Display,
     gio::{
         ApplicationFlags,
         prelude::{ApplicationExt, ApplicationExtManual},
     },
     glib::{WeakRef, object::ObjectExt, subclass::types::ObjectSubclassIsExt},
-    prelude::{BoxExt, GtkWindowExt, WidgetExt}
+    prelude::{BoxExt, GtkWindowExt, WidgetExt},
 };
 use tokio::sync::broadcast;
 
@@ -70,7 +70,7 @@ async fn main() {
             win.present();
 
             for spec in config {
-                create_widgets(&imp.viewport.get(), spec, Rc::clone(&state));
+                create_widgets(&imp.viewport.get(), spec, Rc::clone(&state), false);
             }
 
             // Listen async for server responses/notifications
@@ -82,7 +82,10 @@ async fn main() {
                     while let Ok(buf) = rx.recv().await {
                         match serde_json::from_slice::<Response>(&buf) {
                             Ok(b) => match b {
-                                Response::BatteryStateChange { state: s, percentage: p} => {
+                                Response::BatteryStateChange {
+                                    state: s,
+                                    percentage: p,
+                                } => {
                                     state.borrow().batteries().for_each(|bat| {
                                         bat.update_state(s, p);
                                         bat.queue_draw();
@@ -113,7 +116,7 @@ async fn main() {
     setup.app.run();
 }
 
-fn create_widgets(viewport: &Box, spec: WidgetSpec, state: Rc<RefCell<UiState>>) {
+fn create_widgets(viewport: &Box, spec: WidgetSpec, state: Rc<RefCell<UiState>>, in_holder: bool) {
     match spec {
         WidgetSpec::Battery { .. } => {
             let bat = BatteryBuilder::new(&spec).for_box(&viewport).build();
@@ -149,8 +152,22 @@ fn create_widgets(viewport: &Box, spec: WidgetSpec, state: Rc<RefCell<UiState>>)
                 .push(WatsonWidget::NoticationCentre(notification_centre));
         }
         WidgetSpec::Button { .. } => {
-            let button = ButtonBuilder::new(&spec).for_box(&viewport).build();
-            state.borrow_mut().widgets.push(WatsonWidget::Button(button));
+            let button = ButtonBuilder::new(&spec, in_holder)
+                .for_box(&viewport)
+                .build();
+            state
+                .borrow_mut()
+                .widgets
+                .push(WatsonWidget::Button(button));
+        }
+        WidgetSpec::Slider { .. } => {
+            let slider = SliderBuilder::new(&spec, in_holder)
+                .for_box(&viewport)
+                .build();
+            state
+                .borrow_mut()
+                .widgets
+                .push(WatsonWidget::Slider(slider));
         }
         WidgetSpec::Column {
             base,
@@ -159,8 +176,10 @@ fn create_widgets(viewport: &Box, spec: WidgetSpec, state: Rc<RefCell<UiState>>)
         } => {
             let col = Box::builder()
                 .orientation(gtk4::Orientation::Vertical)
-                .valign(gtk4::Align::Start)
-                .halign(gtk4::Align::Start)
+                .valign(gtk4::Align::Fill)
+                .halign(gtk4::Align::Fill)
+                .vexpand(true)
+                .hexpand(true)
                 .spacing(spacing)
                 .build();
 
@@ -171,7 +190,7 @@ fn create_widgets(viewport: &Box, spec: WidgetSpec, state: Rc<RefCell<UiState>>)
             viewport.append(&col);
 
             for child in children {
-                create_widgets(&col, child, state.clone());
+                create_widgets(&col, child, state.clone(), true);
             }
         }
         WidgetSpec::Row {
@@ -181,8 +200,10 @@ fn create_widgets(viewport: &Box, spec: WidgetSpec, state: Rc<RefCell<UiState>>)
         } => {
             let row = Box::builder()
                 .orientation(gtk4::Orientation::Horizontal)
-                .valign(gtk4::Align::Start)
-                .halign(gtk4::Align::Start)
+                .valign(gtk4::Align::Fill)
+                .halign(gtk4::Align::Fill)
+                .hexpand(true)
+                .vexpand(true)
                 .spacing(spacing)
                 .build();
             if let Some(id) = base.id {
@@ -192,8 +213,40 @@ fn create_widgets(viewport: &Box, spec: WidgetSpec, state: Rc<RefCell<UiState>>)
             viewport.append(&row);
 
             for child in children {
-                create_widgets(&row, child, state.clone());
+                create_widgets(&row, child, state.clone(), true);
             }
+        }
+        WidgetSpec::Spacer { base } => {
+            let spacer = Box::builder()
+                .css_classes(["widget", "spacer"])
+                .valign(gtk4::Align::Fill)
+                .halign(gtk4::Align::Fill)
+                .hexpand(true)
+                .vexpand(true)
+                .height_request(10)
+                .width_request(10)
+                .build();
+
+            if let Some(id) = base.id {
+                spacer.set_widget_name(&id);
+            }
+
+            viewport.append(&spacer);
+        }
+        WidgetSpec::Separator { base } => {
+            let separator = Separator::builder()
+                .css_classes(["separator"])
+                .valign(gtk4::Align::Fill)
+                .halign(gtk4::Align::Fill)
+                .hexpand(true)
+                .vexpand(true)
+                .build();
+
+            if let Some(id) = base.id {
+                separator.set_widget_name(&id);
+            }
+
+            viewport.append(&separator);
         }
     }
 }
@@ -253,6 +306,7 @@ pub enum WatsonWidget {
     Clock(WeakRef<DrawingArea>),
     NoticationCentre(NotificationCentre),
     Button(Button),
+    Slider(Slider),
 }
 impl WatsonWidget {
     pub fn widget_type(&self) -> WatsonWidgetType {
@@ -262,6 +316,7 @@ impl WatsonWidget {
             Self::Clock(_) => WatsonWidgetType::Clock,
             Self::NoticationCentre(_) => WatsonWidgetType::NotificationCentre,
             Self::Button(_) => WatsonWidgetType::Button,
+            Self::Slider(_) => WatsonWidgetType::Slider,
         }
     }
 }
@@ -272,6 +327,7 @@ pub enum WatsonWidgetType {
     Clock,
     NotificationCentre,
     Button,
+    Slider,
 }
 
 #[derive(Default)]

@@ -7,29 +7,66 @@ window {
     padding: 20px;
 }
 
+
+#b{
+    background: #181818;
+    border: 1px solid #333333;
+    border-radius: 20px;
+    margin: 10px;
+    padding: 15px;
+}
+#b .widget {
+    border: unset;
+    margin: unset;
+}
+
 .widget{
     margin: 10px;
+    border-radius: 20px;
+    background: #181818;
+    border: 1px solid #333333;
+}
+.no-widget {
+    margin: 0px;
+    border-radius: 0px;
+    border: none;
 }
 
 .calendar {
-    border-radius: 20px;
-    background: #181818;
     color: rgb(150, 150, 150);
-    border: 1px solid #333333;
 }
 
 .clock {
-    border-radius: 20px;
-    background: #181818;
     color: rgb(0, 0, 0);
-    border: 1px solid #333333;
 }
 .battery {
-    border-radius: 20px;
-    background: #181818;
     color: rgb(150, 150, 150);
-    border: 1px solid #333333;
+}
+.button {
+    color: rgb(150, 150, 150);
     padding: 5px;
+}
+.slider {
+    color: #333333;
+    border-radius: 999px;
+    min-width: 60px;
+}
+.button image {
+    -gtk-icon-size: 20px;
+}
+image.active {
+    transition: 0.2s ease-in-out;
+    color: white;
+}
+image.inactive {
+    transition: 0.2s ease-in;
+    color: gray;
+}
+.separator{
+    background: #333333;
+    border-radius: 999px;
+    min-height: 1px;
+    margin: 0px 10px;
 }
 
 /* ********************************************* */

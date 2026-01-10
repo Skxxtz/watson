@@ -5,7 +5,11 @@ use std::{
 
 use serde::{Deserialize, Serialize};
 
-use crate::{errors::{WatsonError, WatsonErrorKind}, notification::Notification, watson_err};
+use crate::{
+    errors::{WatsonError, WatsonErrorKind},
+    notification::Notification,
+    watson_err,
+};
 
 pub struct SocketData;
 impl SocketData {
@@ -39,7 +43,7 @@ impl BatteryState {
 
 #[derive(Clone, Copy, Debug, Serialize, Deserialize)]
 pub enum InternalMessage {
-    BatteryState{
+    BatteryState {
         state: BatteryState,
         percentage: u32,
     },
@@ -51,7 +55,10 @@ pub enum Response {
     Ok,
     Error(String),
     Pong,
-    Status { running: bool, silent: bool },
+    Status {
+        running: bool,
+        silent: bool,
+    },
     Notification(Option<Notification>),
     Notifications(Vec<Notification>),
     BatteryStateChange {

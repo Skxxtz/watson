@@ -2,14 +2,16 @@
     <template class="MainWindow" parent="GtkApplicationWindow">
         <child>
             <object class="GtkScrolledWindow" id="viewport-scroll">
-                <property name="min-content-width">400</property>
-                <property name="min-content-height">1000</property>
+                <property name="hscrollbar-policy">never</property>
+                <property name="vscrollbar-policy">external</property> 
+                <property name="propagate-natural-height">true</property>
+                
                 <child>
                     <object class="GtkBox" id="viewport">
                         <property name="orientation">vertical</property>
-                        <property name="spacing">0</property>
+                        <property name="spacing">10</property> 
                         <property name="vexpand">true</property>
-                        <property name="hexpand">true</property>
+                        <property name="valign">start</property> 
                     </object>
                 </child>
             </object>

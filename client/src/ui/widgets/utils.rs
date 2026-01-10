@@ -313,12 +313,21 @@ pub enum AnimationDirection {
     },
     Uninitialized,
 }
+impl AnimationDirection {
+    fn end(&self) -> f64 {
+        match self {
+            Self::Uninitialized | Self::Forward { .. } => 1.0,
+            Self::Backward { .. } => 0.0,
+        }
+    }
+}
 
 pub struct AnimationState {
     pub progress: Cell<f64>,
     pub running: Cell<bool>,
     last_time: Cell<Option<i64>>,
     direction: Cell<AnimationDirection>,
+    pub n_runs: Cell<u64>,
 }
 
 impl AnimationState {
@@ -328,10 +337,11 @@ impl AnimationState {
             running: Cell::new(false),
             progress: Cell::new(0.0),
             direction: Cell::new(AnimationDirection::Uninitialized),
+            n_runs: Cell::new(0),
         }
     }
     pub fn start(&self, direction: AnimationDirection) {
-        self.progress.set(0.0);
+        self.n_runs.set(self.n_runs.get() + 1);
         self.running.set(true);
         self.last_time.set(None);
         self.direction.set(direction);
@@ -370,12 +380,12 @@ impl AnimationState {
 
         // Stop animation if done
         if eased_progress >= 1.0 || eased_progress <= 0.0 {
-            self.progress.set(1.0);
+            self.progress.set(self.direction.get().end());
             self.running.set(false);
         }
     }
     fn reset(&self) {
-        self.progress.set(0.0);
+        self.progress.set(self.direction.get().end());
         self.running.set(false);
         self.last_time.set(None);
         self.direction.set(AnimationDirection::Uninitialized);

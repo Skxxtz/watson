@@ -1,13 +1,20 @@
 mod imp {
+    use std::cell::RefCell;
+    use std::rc::Rc;
+
     use gtk4::glib;
     use gtk4::subclass::prelude::*;
     use gtk4::{ApplicationWindow, Box as GtkBox};
+
+    use crate::UiState;
 
     #[derive(gtk4::CompositeTemplate, Default)]
     #[template(resource = "/dev/skxxtz/watson/ui/window.ui")]
     pub struct MainWindow {
         #[template_child(id = "viewport")]
         pub viewport: TemplateChild<GtkBox>,
+
+        pub state: Rc<RefCell<UiState>>,
     }
 
     #[glib::object_subclass]

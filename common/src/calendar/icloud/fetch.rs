@@ -57,6 +57,15 @@ impl ICloudCalendarClient {
         let mut headers = self.headers.clone();
         let params = request.params();
         headers.insert("Depth", HeaderValue::from_static(params.depth));
+        headers.insert(
+            reqwest::header::CONTENT_TYPE,
+            HeaderValue::from_static("text/xml; charset=utf-8"),
+        );
+        headers.insert(
+            reqwest::header::USER_AGENT,
+            HeaderValue::from_static("Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36")
+        );
+
         let body = request.body();
 
         let resp = match &self.data {

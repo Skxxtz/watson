@@ -50,13 +50,13 @@ impl BatteryBuilder {
         let specs = Rc::new(specs.clone());
 
         let bat_area = DrawingArea::builder()
-            .vexpand(false)
-            .hexpand(false)
+            .vexpand(true)
+            .hexpand(true)
             .css_classes(["widget", "battery"])
-            .halign(gtk4::Align::Start)
-            .valign(gtk4::Align::Start)
-            .width_request(100)
-            .height_request(100)
+            .halign(gtk4::Align::Fill)
+            .valign(gtk4::Align::Fill)
+            .height_request(10)
+            .width_request(10)
             .build();
 
         if let Some(id) = specs.id() {

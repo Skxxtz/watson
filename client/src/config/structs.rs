@@ -5,7 +5,7 @@ use common::errors::{WatsonError, WatsonErrorKind};
 use common::watson_err;
 use serde::{Deserialize, Serialize};
 
-use crate::ui::widgets::HandStyle;
+use crate::ui::widgets::{ButtonFunc, HandStyle, SliderFunc, SliderRange};
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct WidgetBase {
@@ -13,6 +13,8 @@ pub struct WidgetBase {
     pub id: Option<String>,
     #[serde(default)]
     pub class: Option<String>,
+    #[serde(default)]
+    pub size_request: Option<(i32, i32)>,
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
@@ -71,6 +73,16 @@ pub enum WidgetSpec {
         #[serde(flatten)]
         base: WidgetBase,
     },
+    Button {
+        #[serde(flatten)]
+        base: WidgetBase,
+
+        #[serde(default)]
+        func: ButtonFunc,
+
+        #[serde(default)]
+        icon: Option<String>,
+    },
     Row {
         #[serde(flatten)]
         base: WidgetBase,
@@ -78,6 +90,19 @@ pub enum WidgetSpec {
         #[serde(default)]
         spacing: i32,
         children: Vec<WidgetSpec>,
+    },
+    Slider {
+        #[serde(flatten)]
+        base: WidgetBase,
+
+        #[serde(default)]
+        func: SliderFunc,
+
+        #[serde(default)]
+        icon: Option<String>,
+
+        #[serde(default)]
+        range: SliderRange,
     },
     Column {
         #[serde(flatten)]
@@ -87,23 +112,65 @@ pub enum WidgetSpec {
         spacing: i32,
         children: Vec<WidgetSpec>,
     },
+    Spacer {
+        #[serde(flatten)]
+        base: WidgetBase,
+    },
+    Separator {
+        #[serde(flatten)]
+        base: WidgetBase,
+    },
+}
+
+macro_rules! delegate_base {
+    ($self:ident, [$($variant:ident),*], $item:ident => $body:expr) => {
+        match $self {
+            $(Self::$variant { $item, .. } => $body,)*
+        }
+    };
 }
 impl WidgetSpec {
-    pub fn base(&self) -> Option<&WidgetBase> {
-        match self {
-            Self::Battery { base, .. } => Some(base),
-            Self::Calendar { base, .. } => Some(base),
-            Self::Clock { base, .. } => Some(base),
-            Self::Notifications { base, .. } => Some(base),
-            Self::Column { base, .. } => Some(base),
-            Self::Row { base, .. } => Some(base),
-        }
+    pub fn base(&self) -> &WidgetBase {
+        delegate_base!(self, [
+            Battery,
+            Button,
+            Calendar,
+            Clock,
+            Column,
+            Notifications,
+            Row,
+            Separator,
+            Slider,
+            Spacer
+        ], base => base)
     }
     pub fn id(&self) -> Option<&String> {
-        self.base().and_then(|b| b.id.as_ref())
+        self.base().id.as_ref()
     }
     pub fn class(&self) -> Option<&String> {
-        self.base().and_then(|b| b.class.as_ref())
+        self.base().id.as_ref()
+    }
+}
+impl WidgetSpec {
+    pub fn as_button(&self) -> Option<(&WidgetBase, &ButtonFunc, Option<String>)> {
+        if let Self::Button { base, func, icon } = self {
+            Some((base, func, icon.clone()))
+        } else {
+            None
+        }
+    }
+    pub fn as_slider(&self) -> Option<(&WidgetBase, &SliderFunc, Option<String>, &SliderRange)> {
+        if let Self::Slider {
+            base,
+            func,
+            icon,
+            range,
+        } = self
+        {
+            Some((base, func, icon.clone(), range))
+        } else {
+            None
+        }
     }
 }
 

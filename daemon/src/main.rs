@@ -65,7 +65,6 @@ async fn battery_state_listener(sender: broadcast::Sender<InternalMessage>) -> z
 
     // Cache to prevent redundant updates
     let mut last_state = BatteryState::Invalid;
-    let mut last_percentage = BatteryState::capacity().ok();
 
     while let Some(signal) = stream.next().await {
         let (iface, changed, _): (String, HashMap<String, OwnedValue>, Vec<String>) =
@@ -78,9 +77,6 @@ async fn battery_state_listener(sender: broadcast::Sender<InternalMessage>) -> z
         let new_state_raw = changed
             .get("State")
             .and_then(|v| TryInto::<u32>::try_into(v).ok());
-        let new_perc_raw = changed
-            .get("Percentage")
-            .and_then(|v| TryInto::<f64>::try_into(v).ok());
 
         let mut changed_significantly = false;
         if let Some(s) = new_state_raw {
@@ -95,12 +91,9 @@ async fn battery_state_listener(sender: broadcast::Sender<InternalMessage>) -> z
                 changed_significantly = true;
             }
         }
-        if new_perc_raw.is_some() {
-            last_percentage = new_state_raw.map(|i| i as u32);
-        }
 
         // Check for changes
-        if let Some(percentage) = last_percentage {
+        if let Ok(percentage) = BatteryState::capacity() {
             if changed_significantly && last_state != BatteryState::Invalid {
                 let _ = sender.send(InternalMessage::BatteryState {
                     state: last_state,
