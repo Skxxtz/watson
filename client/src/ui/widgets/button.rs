@@ -1,10 +1,12 @@
 use crate::{
+    DAEMON_TX, SystemState,
     config::WidgetSpec,
     ui::{
         g_templates::main_window::MainWindow,
         widgets::utils::{CairoShapesExt, Rgba, WidgetOption},
     },
 };
+use common::protocol::PowerMode;
 use gtk4::{
     Box, DrawingArea, GestureClick, Image, Overlay,
     cairo::Context,
@@ -37,35 +39,37 @@ pub struct ButtonBuilder {
     func: ButtonFunc,
 }
 impl ButtonBuilder {
-    pub fn new(specs: &WidgetSpec, in_holder: bool) -> Self {
+    pub fn new(specs: &WidgetSpec, system_state: Rc<SystemState>, in_holder: bool) -> Self {
         let specs = Rc::new(specs.clone());
-        let (_, func, icon) = specs.as_button().unwrap();
+        let (base, func, icon) = specs.as_button().unwrap();
         let icon = icon.unwrap_or(func.icon_name());
 
-        let builder = Overlay::builder().css_classes(["widget", "button"]);
+        let initial_class = if func.is_active(&system_state) {
+            "active"
+        } else {
+            "inactive"
+        };
+        let builder = Overlay::builder().css_classes(["widget", "button", initial_class]);
 
         let overlay = if in_holder {
             builder
                 .vexpand(true)
                 .hexpand(true)
-                .halign(gtk4::Align::Fill)
-                .valign(gtk4::Align::Fill)
+                .valign(base.valign.map(|d| d.into()).unwrap_or(gtk4::Align::Fill))
+                .halign(base.halign.map(|d| d.into()).unwrap_or(gtk4::Align::Fill))
                 .height_request(10)
                 .width_request(10)
         } else {
             builder
-                .halign(gtk4::Align::Start)
-                .valign(gtk4::Align::Start)
+                .valign(base.valign.map(|d| d.into()).unwrap_or(gtk4::Align::Start))
+                .halign(base.halign.map(|d| d.into()).unwrap_or(gtk4::Align::Start))
                 .height_request(100)
                 .width_request(100)
         }
         .build();
 
         let area = DrawingArea::new();
-        let svg_icon = Image::builder()
-            .icon_name(icon)
-            .css_classes(["active"])
-            .build();
+        let svg_icon = Image::builder().icon_name(icon).can_target(false).build();
 
         overlay.set_child(Some(&area));
         overlay.add_overlay(&svg_icon);
@@ -93,7 +97,7 @@ impl ButtonBuilder {
             }
         });
 
-        Button::connect_clicked(&svg_icon, *func);
+        Button::connect_clicked(&overlay, *func, system_state);
 
         Self {
             ui: WidgetOption::Owned(area),
@@ -125,25 +129,21 @@ impl Button {
         let radius = (side / 2.0) - padding;
         let (cx, cy) = (width as f64 / 2.0, height as f64 / 2.0);
 
-        // Background
-        let grad =
-            gtk4::cairo::LinearGradient::new(cx - radius, cy - radius, cx + radius, cy + radius);
-        grad.add_color_stop_rgba(0.0, color.r * 1.2, color.g * 1.2, color.b * 1.2, 0.15);
-        grad.add_color_stop_rgba(1.0, color.r * 0.7, color.g * 0.7, color.b * 0.7, 0.4);
-
-        ctx.set_source(&grad).unwrap();
+        ctx.set_source_rgba(color.r, color.g, color.b, color.a);
         CairoShapesExt::circle(ctx, cx, cy, radius);
     }
 
-    fn connect_clicked(target: &Image, func: ButtonFunc) {
+    fn connect_clicked(target: &Overlay, func: ButtonFunc, system_state: Rc<SystemState>) {
         let click = GestureClick::new();
-        let times = std::cell::Cell::new(0);
+        let times = std::cell::Cell::new(func.is_active(&system_state));
         click.connect_pressed({
             let target = target.downgrade();
+            let state = Rc::clone(&system_state);
             move |_gesture, _, _, _| {
-                times.set(times.get() + 1);
+                func.execute(Rc::clone(&state));
+                times.set(!times.get());
                 if let Some(target) = target.upgrade() {
-                    if times.get() % 2 == 0 {
+                    if times.get() {
                         target.remove_css_class("inactive");
                         target.add_css_class("active");
                     } else {
@@ -165,8 +165,8 @@ pub enum ButtonFunc {
     None,
     Wifi,
     Bluetooth,
-    Anonymous,
     Dnd,
+    PowerSave,
 }
 impl ButtonFunc {
     pub fn update_widgets(&self) {
@@ -181,10 +181,44 @@ impl ButtonFunc {
         match self {
             Self::Wifi => "network-wireless-signal-excellent-symbolic",
             Self::Bluetooth => "bluetooth-symbolic",
+            Self::PowerSave => "power-profile-power-saver-symbolic",
             Self::Dnd => "weather-clear-night-symbolic",
-            Self::Anonymous => "security-high-symbolic",
             Self::None => "none",
         }
         .into()
+    }
+    pub fn execute(&self, state: Rc<SystemState>) {
+        match self {
+            ButtonFunc::Wifi => {
+                let target = !state.wifi.get();
+                DAEMON_TX
+                    .get()
+                    .map(|d| d.send(common::protocol::Request::SetWifi(target)));
+                state.wifi.set(target);
+            }
+            ButtonFunc::Bluetooth => {
+                let target = !state.bluetooth.get();
+                DAEMON_TX
+                    .get()
+                    .map(|d| d.send(common::protocol::Request::SetBluetooth(target)));
+                state.wifi.set(target);
+            }
+            ButtonFunc::PowerSave => {
+                let target = !state.powermode.get();
+                DAEMON_TX
+                    .get()
+                    .map(|d| d.send(common::protocol::Request::SetPowerMode(target)));
+                state.powermode.set(target);
+            }
+            _ => {}
+        }
+    }
+    pub fn is_active(&self, state: &Rc<SystemState>) -> bool {
+        match self {
+            ButtonFunc::Wifi => state.wifi.get(),
+            ButtonFunc::Bluetooth => state.bluetooth.get(),
+            ButtonFunc::PowerSave => state.powermode.get() == PowerMode::PowerSave,
+            _ => false,
+        }
     }
 }

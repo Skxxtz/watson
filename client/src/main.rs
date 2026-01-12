@@ -1,4 +1,4 @@
-use std::{cell::RefCell, env, rc::Rc};
+use std::{cell::RefCell, env, rc::Rc, sync::OnceLock};
 
 use crate::{
     config::{WidgetSpec, load_config},
@@ -7,16 +7,19 @@ use crate::{
         WatsonUi,
         widgets::{
             Battery, BatteryBuilder, Button, ButtonBuilder, ButtonFunc, Calendar, Clock,
-            NotificationCentre, NotificationCentreBuilder, Slider, SliderBuilder,
+            NotificationCentre, NotificationCentreBuilder, Slider, SliderBuilder, SliderFunc,
         },
     },
 };
 use common::{
-    config::flags::ArgParse, notification::Notification, protocol::Response,
-    tokio::AsyncSizedMessage,
+    config::flags::ArgParse,
+    errors::WatsonError,
+    notification::Notification,
+    protocol::{Request, Response, SystemState},
 };
+use futures::executor::block_on;
 use gtk4::{
-    Application, Box, CssProvider, DrawingArea, Separator,
+    Align, Application, AspectFrame, Box, CssProvider, DrawingArea, Separator,
     gdk::Display,
     gio::{
         ApplicationFlags,
@@ -25,19 +28,24 @@ use gtk4::{
     glib::{WeakRef, object::ObjectExt, subclass::types::ObjectSubclassIsExt},
     prelude::{BoxExt, GtkWindowExt, WidgetExt},
 };
-use tokio::sync::broadcast;
+use tokio::sync::{broadcast, mpsc::UnboundedSender};
 
 mod config;
 mod connection;
 mod ui;
 
+static DAEMON_TX: OnceLock<UnboundedSender<Request>> = OnceLock::new();
+
 #[tokio::main]
-async fn main() {
+async fn main() -> Result<(), WatsonError> {
     let (tx, rx) = broadcast::channel::<Vec<u8>>(2);
-    let state = Rc::new(RefCell::new(UiState::new()));
+    let state = Rc::new(RefCell::new(WatsonState::new()));
 
     let _ = ArgParse::parse(std::env::args()).await;
-    let _ = connect(tx).await;
+    let client = ClientConnection::new().await?;
+    DAEMON_TX
+        .set(client.spawn_engine(tx).await)
+        .expect("DAEMON_TX already set");
 
     let notification_store = Rc::new(RefCell::new(NotificationStore::new()));
 
@@ -54,6 +62,32 @@ async fn main() {
                 }
             };
 
+            // Register services with daemon
+            let required_services = config
+                .iter()
+                .map(WidgetSpec::required_services)
+                .reduce(|a, b| a | b)
+                .unwrap_or(0);
+            DAEMON_TX
+                .get()
+                .map(|d| d.send(Request::RegisterServices(required_services)));
+
+            // Send State Query to Daemon
+            DAEMON_TX.get().map(|d| d.send(Request::SystemState));
+            let system_state = block_on({
+                let mut rx = rx.resubscribe();
+                async move {
+                    if let Ok(msg) = rx.recv().await {
+                        if let Ok(resp) = bincode::deserialize::<Response>(&msg) {
+                            if let Response::SystemState(s) = resp {
+                                return Some(s);
+                            }
+                        }
+                    }
+                    None
+                }
+            });
+
             // Load css
             let provider = CssProvider::new();
             let display = Display::default().unwrap();
@@ -69,8 +103,15 @@ async fn main() {
             let imp = win.imp();
             win.present();
 
+            let system_state = Rc::new(system_state.unwrap_or_default());
             for spec in config {
-                create_widgets(&imp.viewport.get(), spec, Rc::clone(&state), false);
+                create_widgets(
+                    &imp.viewport.get(),
+                    spec,
+                    Rc::clone(&state),
+                    Rc::clone(&system_state),
+                    false,
+                );
             }
 
             // Listen async for server responses/notifications
@@ -80,7 +121,7 @@ async fn main() {
                 let store = Rc::clone(&notification_store);
                 async move {
                     while let Ok(buf) = rx.recv().await {
-                        match serde_json::from_slice::<Response>(&buf) {
+                        match bincode::deserialize::<Response>(&buf) {
                             Ok(b) => match b {
                                 Response::BatteryStateChange {
                                     state: s,
@@ -104,9 +145,16 @@ async fn main() {
                                         .notifications
                                         .extend(s.into_iter().map(|v| Rc::new(v)));
                                 }
-                                _ => {}
+                                Response::SystemState(s) => {
+                                    state.borrow_mut().system_state.replace(s);
+                                }
+                                _ => {
+                                    println!("{:?}", b);
+                                }
                             },
-                            Err(_) => {}
+                            Err(e) => {
+                                eprintln!("{e}: {}", String::from_utf8_lossy(&buf))
+                            }
                         }
                     }
                 }
@@ -114,12 +162,21 @@ async fn main() {
         }
     });
     setup.app.run();
+    Ok(())
 }
 
-fn create_widgets(viewport: &Box, spec: WidgetSpec, state: Rc<RefCell<UiState>>, in_holder: bool) {
+fn create_widgets(
+    viewport: &Box,
+    spec: WidgetSpec,
+    state: Rc<RefCell<WatsonState>>,
+    system_state: Rc<SystemState>,
+    in_holder: bool,
+) {
     match spec {
         WidgetSpec::Battery { .. } => {
-            let bat = BatteryBuilder::new(&spec).for_box(&viewport).build();
+            let bat = BatteryBuilder::new(&spec, in_holder)
+                .for_box(&viewport)
+                .build();
 
             state.borrow_mut().widgets.push(WatsonWidget::Battery(bat));
         }
@@ -144,15 +201,17 @@ fn create_widgets(viewport: &Box, spec: WidgetSpec, state: Rc<RefCell<UiState>>,
             viewport.append(&clock);
         }
         WidgetSpec::Notifications { .. } => {
-            let notification_centre = NotificationCentreBuilder::new().for_box(&viewport).build();
+            let notification_centre = NotificationCentreBuilder::new(&spec)
+                .for_box(&viewport)
+                .build();
 
             state
                 .borrow_mut()
                 .widgets
-                .push(WatsonWidget::NoticationCentre(notification_centre));
+                .push(WatsonWidget::NotificationCentre(notification_centre));
         }
         WidgetSpec::Button { .. } => {
-            let button = ButtonBuilder::new(&spec, in_holder)
+            let button = ButtonBuilder::new(&spec, Rc::clone(&system_state), in_holder)
                 .for_box(&viewport)
                 .build();
             state
@@ -161,9 +220,10 @@ fn create_widgets(viewport: &Box, spec: WidgetSpec, state: Rc<RefCell<UiState>>,
                 .push(WatsonWidget::Button(button));
         }
         WidgetSpec::Slider { .. } => {
-            let slider = SliderBuilder::new(&spec, in_holder)
+            let slider = SliderBuilder::new(&spec, Rc::clone(&system_state), in_holder)
                 .for_box(&viewport)
                 .build();
+
             state
                 .borrow_mut()
                 .widgets
@@ -176,8 +236,8 @@ fn create_widgets(viewport: &Box, spec: WidgetSpec, state: Rc<RefCell<UiState>>,
         } => {
             let col = Box::builder()
                 .orientation(gtk4::Orientation::Vertical)
-                .valign(gtk4::Align::Fill)
-                .halign(gtk4::Align::Fill)
+                .valign(base.valign.map(|d| d.into()).unwrap_or(Align::Fill))
+                .halign(base.halign.map(|d| d.into()).unwrap_or(Align::Fill))
                 .vexpand(true)
                 .hexpand(true)
                 .spacing(spacing)
@@ -187,10 +247,21 @@ fn create_widgets(viewport: &Box, spec: WidgetSpec, state: Rc<RefCell<UiState>>,
                 col.set_widget_name(&id);
             }
 
-            viewport.append(&col);
+            if let Some(ratio) = base.ratio {
+                let aspect_frame = AspectFrame::builder()
+                    .valign(base.valign.map(|d| d.into()).unwrap_or(Align::Fill))
+                    .halign(base.halign.map(|d| d.into()).unwrap_or(Align::Fill))
+                    .ratio(ratio)
+                    .obey_child(false)
+                    .child(&col)
+                    .build();
+                viewport.append(&aspect_frame);
+            } else {
+                viewport.append(&col);
+            }
 
             for child in children {
-                create_widgets(&col, child, state.clone(), true);
+                create_widgets(&col, child, state.clone(), Rc::clone(&system_state), true);
             }
         }
         WidgetSpec::Row {
@@ -200,8 +271,8 @@ fn create_widgets(viewport: &Box, spec: WidgetSpec, state: Rc<RefCell<UiState>>,
         } => {
             let row = Box::builder()
                 .orientation(gtk4::Orientation::Horizontal)
-                .valign(gtk4::Align::Fill)
-                .halign(gtk4::Align::Fill)
+                .valign(base.valign.map(|d| d.into()).unwrap_or(Align::Fill))
+                .halign(base.halign.map(|d| d.into()).unwrap_or(Align::Fill))
                 .hexpand(true)
                 .vexpand(true)
                 .spacing(spacing)
@@ -210,17 +281,28 @@ fn create_widgets(viewport: &Box, spec: WidgetSpec, state: Rc<RefCell<UiState>>,
                 row.set_widget_name(&id);
             }
 
-            viewport.append(&row);
+            if let Some(ratio) = base.ratio {
+                let aspect_frame = AspectFrame::builder()
+                    .ratio(ratio)
+                    .obey_child(false)
+                    .valign(base.valign.map(|d| d.into()).unwrap_or(Align::Fill))
+                    .halign(base.halign.map(|d| d.into()).unwrap_or(Align::Fill))
+                    .child(&row)
+                    .build();
+                viewport.append(&aspect_frame);
+            } else {
+                viewport.append(&row);
+            }
 
             for child in children {
-                create_widgets(&row, child, state.clone(), true);
+                create_widgets(&row, child, state.clone(), Rc::clone(&system_state), true);
             }
         }
         WidgetSpec::Spacer { base } => {
             let spacer = Box::builder()
                 .css_classes(["widget", "spacer"])
-                .valign(gtk4::Align::Fill)
-                .halign(gtk4::Align::Fill)
+                .valign(base.valign.map(|d| d.into()).unwrap_or(Align::Fill))
+                .halign(base.halign.map(|d| d.into()).unwrap_or(Align::Fill))
                 .hexpand(true)
                 .vexpand(true)
                 .height_request(10)
@@ -236,8 +318,8 @@ fn create_widgets(viewport: &Box, spec: WidgetSpec, state: Rc<RefCell<UiState>>,
         WidgetSpec::Separator { base } => {
             let separator = Separator::builder()
                 .css_classes(["separator"])
-                .valign(gtk4::Align::Fill)
-                .halign(gtk4::Align::Fill)
+                .valign(base.valign.map(|d| d.into()).unwrap_or(Align::Fill))
+                .halign(base.halign.map(|d| d.into()).unwrap_or(Align::Fill))
                 .hexpand(true)
                 .vexpand(true)
                 .build();
@@ -272,73 +354,53 @@ fn setup() -> Setup {
     Setup { app }
 }
 
-async fn connect(sender: broadcast::Sender<Vec<u8>>) {
-    match ClientConnection::new().await {
-        Ok(c) => {
-            let mut read_stream = c.stream;
-            tokio::spawn(async move {
-                loop {
-                    match read_stream.read_sized().await {
-                        Ok(buf) => {
-                            if buf.is_empty() {
-                                continue;
-                            }
-                            let _ = sender.send(buf);
-                        }
-                        Err(e) => {
-                            eprintln!("Connection closed: {e}");
-                            break;
-                        }
-                    }
-                }
-            });
+macro_rules! define_widgets {
+    ($($name:ident($data:ty)),* $(,)?) => {
+        #[derive(PartialEq, Copy, Clone, Debug)]
+        pub enum WatsonWidgetType {
+            $($name),*
         }
-        Err(e) => {
-            eprintln!("{e}");
+
+        #[derive(Debug, Clone)]
+        pub enum WatsonWidget {
+            $($name($data)),*
+        }
+
+        impl WatsonWidget {
+            pub fn widget_type(&self) -> WatsonWidgetType {
+                match self {
+                    $(Self::$name(_) => WatsonWidgetType::$name),*
+                }
+            }
+
+            pub fn name(&self) -> &'static str {
+                match self {
+                    $(Self::$name(_) => stringify!($name)),*
+                }
+            }
         }
     };
 }
-
-#[derive(Clone, Debug)]
-pub enum WatsonWidget {
+define_widgets! {
     Battery(Battery),
     Calendar(WeakRef<DrawingArea>),
     Clock(WeakRef<DrawingArea>),
-    NoticationCentre(NotificationCentre),
+    NotificationCentre(NotificationCentre),
     Button(Button),
     Slider(Slider),
 }
-impl WatsonWidget {
-    pub fn widget_type(&self) -> WatsonWidgetType {
-        match self {
-            Self::Battery(_) => WatsonWidgetType::Battery,
-            Self::Calendar(_) => WatsonWidgetType::Calendar,
-            Self::Clock(_) => WatsonWidgetType::Clock,
-            Self::NoticationCentre(_) => WatsonWidgetType::NotificationCentre,
-            Self::Button(_) => WatsonWidgetType::Button,
-            Self::Slider(_) => WatsonWidgetType::Slider,
-        }
-    }
-}
-#[derive(PartialEq, Copy, Clone, Debug)]
-pub enum WatsonWidgetType {
-    Battery,
-    Calendar,
-    Clock,
-    NotificationCentre,
-    Button,
-    Slider,
-}
 
 #[derive(Default)]
-pub struct UiState {
+pub struct WatsonState {
     widgets: Vec<WatsonWidget>,
+    system_state: Option<SystemState>,
 }
 #[allow(dead_code)]
-impl UiState {
+impl WatsonState {
     pub fn new() -> Self {
         Self {
             widgets: Vec::new(),
+            system_state: None,
         }
     }
     pub fn batteries(&self) -> impl Iterator<Item = &Battery> {
@@ -370,7 +432,7 @@ impl UiState {
     }
     pub fn notification_centres(&self) -> impl Iterator<Item = &NotificationCentre> {
         self.widgets.iter().filter_map(|w| {
-            if let WatsonWidget::NoticationCentre(c) = w {
+            if let WatsonWidget::NotificationCentre(c) = w {
                 Some(c)
             } else {
                 None
@@ -388,6 +450,18 @@ impl UiState {
                 }
             })
             .filter(move |b| b.func == func)
+    }
+    pub fn slider(&self, func: SliderFunc) -> impl Iterator<Item = &Slider> {
+        self.widgets
+            .iter()
+            .filter_map(|w| {
+                if let WatsonWidget::Slider(s) = w {
+                    Some(s)
+                } else {
+                    None
+                }
+            })
+            .filter(move |s| s.func == func)
     }
 }
 

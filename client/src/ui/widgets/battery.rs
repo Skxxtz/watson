@@ -10,7 +10,7 @@ use common::{
     watson_err,
 };
 use gtk4::{
-    Box, DrawingArea,
+    Align, Box, DrawingArea,
     cairo::{Context, LineCap},
     glib::{WeakRef, object::ObjectExt},
     prelude::{BoxExt, DrawingAreaExtManual, WidgetExt},
@@ -46,18 +46,28 @@ pub struct BatteryBuilder {
     status: Rc<Cell<BatteryStatus>>,
 }
 impl BatteryBuilder {
-    pub fn new(specs: &WidgetSpec) -> Self {
+    pub fn new(specs: &WidgetSpec, in_holder: bool) -> Self {
         let specs = Rc::new(specs.clone());
+        let base = specs.base();
 
-        let bat_area = DrawingArea::builder()
-            .vexpand(true)
-            .hexpand(true)
-            .css_classes(["widget", "battery"])
-            .halign(gtk4::Align::Fill)
-            .valign(gtk4::Align::Fill)
-            .height_request(10)
-            .width_request(10)
-            .build();
+        let builder = DrawingArea::builder().css_classes(["widget", "battery"]);
+
+        let bat_area = if in_holder {
+            builder
+                .vexpand(true)
+                .hexpand(true)
+                .valign(base.valign.map(|d| d.into()).unwrap_or(Align::Fill))
+                .halign(base.halign.map(|d| d.into()).unwrap_or(Align::Fill))
+                .height_request(10)
+                .width_request(10)
+        } else {
+            builder
+                .valign(base.valign.map(|d| d.into()).unwrap_or(Align::Start))
+                .halign(base.halign.map(|d| d.into()).unwrap_or(Align::Start))
+                .height_request(100)
+                .width_request(100)
+        }
+        .build();
 
         if let Some(id) = specs.id() {
             bat_area.set_widget_name(id);

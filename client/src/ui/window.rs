@@ -1,4 +1,4 @@
-use gtk4::{Application, glib::object::ObjectExt, prelude::WidgetExt};
+use gtk4::{Application, glib::object::ObjectExt};
 use gtk4_layer_shell::LayerShell;
 
 use crate::ui::{WatsonUi, g_templates::main_window::MainWindow};

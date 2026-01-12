@@ -44,6 +44,9 @@ pub enum WatsonErrorKind {
 
     UndefinedAttribute,
     InvalidAttribute,
+    InvalidData,
+
+    IO,
 
     FileOpen,
     FileCreate,
@@ -54,6 +57,7 @@ pub enum WatsonErrorKind {
 
     DirExist,
     DirCreate,
+    DirRead,
 
     Base64Encode,
     Base64Decode,
@@ -63,6 +67,7 @@ pub enum WatsonErrorKind {
     StreamWrite,
     StreamBind,
     StreamConnect,
+    StreamListener,
 
     UrlFormat,
 
@@ -73,4 +78,16 @@ pub enum WatsonErrorKind {
 
     CredentialEntry,
     CredentialRead,
+
+    ProxyCreate,
+    DBusConnect,
+    DBusPropertySet,
+    DBusPropertyGet,
+    DBusProxyCall,
+
+    BluetoothServiceDisabled,
+    BacklightNotFound,
+
+    Audio,
+    Todo,
 }

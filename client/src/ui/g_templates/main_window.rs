@@ -2,11 +2,11 @@ mod imp {
     use std::cell::RefCell;
     use std::rc::Rc;
 
-    use gtk4::{ScrolledWindow, glib};
     use gtk4::subclass::prelude::*;
     use gtk4::{ApplicationWindow, Box as GtkBox};
+    use gtk4::{ScrolledWindow, glib};
 
-    use crate::UiState;
+    use crate::WatsonState;
 
     #[derive(gtk4::CompositeTemplate, Default)]
     #[template(resource = "/dev/skxxtz/watson/ui/window.ui")]
@@ -17,7 +17,7 @@ mod imp {
         #[template_child(id = "viewport-scroll")]
         pub viewport_scroll: TemplateChild<ScrolledWindow>,
 
-        pub state: Rc<RefCell<UiState>>,
+        pub state: Rc<RefCell<WatsonState>>,
     }
 
     #[glib::object_subclass]
@@ -71,8 +71,6 @@ impl MainWindow {
             }
         }
 
-
         obj
-
     }
 }

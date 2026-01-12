@@ -18,13 +18,14 @@ pub struct Clock;
 impl Clock {
     pub fn new(specs: &WidgetSpec) -> DrawingArea {
         let specs = Rc::new(specs.clone());
+        let base = specs.base();
 
         let clock_area = DrawingArea::builder()
             .vexpand(false)
             .hexpand(false)
             .css_classes(["widget", "clock"])
-            .halign(gtk4::Align::Start)
-            .valign(gtk4::Align::Start)
+            .valign(base.valign.map(|d| d.into()).unwrap_or(gtk4::Align::Start))
+            .halign(base.halign.map(|d| d.into()).unwrap_or(gtk4::Align::Start))
             .build();
 
         if let Some(id) = specs.id() {

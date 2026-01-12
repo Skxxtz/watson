@@ -1,11 +1,16 @@
 use std::collections::HashMap;
 use std::sync::Arc;
 
+use common::errors::{WatsonError, WatsonErrorKind};
 use common::notification::Notification;
 use common::protocol::InternalMessage;
-use tokio::sync::{RwLock, broadcast};
-use zbus::interface;
+use common::watson_err;
+use tokio::sync::{Notify, RwLock, broadcast};
 use zbus::zvariant::OwnedValue;
+use zbus::{Connection, interface};
+
+use crate::hardware::HardwareController;
+use crate::service_reg::ServiceRegister;
 
 pub struct DaemonHandle {
     daemon: Arc<RwLock<NotificationDaemon>>,
@@ -24,16 +29,25 @@ pub struct NotificationDaemon {
     id: u32,
     buffer: HashMap<u32, Notification>,
     sender: broadcast::Sender<InternalMessage>,
+    pub wake_signal: Arc<Notify>,
+    pub hardware: HardwareController,
     pub settings: DaemonSettings,
+    pub register: ServiceRegister,
 }
 impl NotificationDaemon {
-    pub fn new(sender: broadcast::Sender<InternalMessage>) -> Self {
-        Self {
+    pub async fn new(sender: broadcast::Sender<InternalMessage>) -> Result<Self, WatsonError> {
+        let conn = Connection::system()
+            .await
+            .map_err(|e| watson_err!(WatsonErrorKind::DBusConnect, e.to_string()))?;
+        Ok(Self {
             id: 0,
             buffer: HashMap::new(),
             sender,
+            wake_signal: Arc::new(Notify::new()),
+            hardware: HardwareController::new(conn),
             settings: DaemonSettings { silent: false },
-        }
+            register: ServiceRegister::new(),
+        })
     }
 
     pub fn get_by_id(&self, id: u32) -> Option<&Notification> {

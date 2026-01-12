@@ -7,9 +7,14 @@ use gtk4::{
     prelude::BoxExt,
 };
 
-use crate::ui::{
-    g_templates::{notification::NotificationWidget, notification_centre::NotificationCollection},
-    widgets::utils::WidgetOption,
+use crate::{
+    config::WidgetSpec,
+    ui::{
+        g_templates::{
+            notification::NotificationWidget, notification_centre::NotificationCollection,
+        },
+        widgets::utils::WidgetOption,
+    },
 };
 
 #[derive(Clone, Debug)]
@@ -35,13 +40,15 @@ pub struct NotificationCentreBuilder {
     list: WeakRef<ListBox>,
 }
 impl NotificationCentreBuilder {
-    pub fn new() -> Self {
+    pub fn new(specs: &WidgetSpec) -> Self {
         let collection = NotificationCollection::new();
+        let base = specs.base();
 
         let list = ListBox::builder()
             .selection_mode(gtk4::SelectionMode::None)
             .hexpand(true)
-            .valign(gtk4::Align::Start)
+            .valign(base.valign.map(|d| d.into()).unwrap_or(gtk4::Align::Start))
+            .halign(base.halign.map(|d| d.into()).unwrap_or(gtk4::Align::Start))
             .build();
 
         collection.append(&list);

@@ -14,7 +14,28 @@ pub struct WidgetBase {
     #[serde(default)]
     pub class: Option<String>,
     #[serde(default)]
-    pub size_request: Option<(i32, i32)>,
+    pub ratio: Option<f32>,
+    #[serde(default)]
+    pub valign: Option<AlignmentWrapper>,
+    #[serde(default)]
+    pub halign: Option<AlignmentWrapper>,
+}
+#[derive(Debug, Clone, Copy, Deserialize, Serialize)]
+pub enum AlignmentWrapper {
+    Start,
+    End,
+    Center,
+    Fill,
+}
+impl From<AlignmentWrapper> for gtk4::Align {
+    fn from(value: AlignmentWrapper) -> Self {
+        match value {
+            AlignmentWrapper::Start => Self::Start,
+            AlignmentWrapper::End => Self::End,
+            AlignmentWrapper::Center => Self::Center,
+            AlignmentWrapper::Fill => Self::Fill,
+        }
+    }
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
@@ -103,6 +124,9 @@ pub enum WidgetSpec {
 
         #[serde(default)]
         range: SliderRange,
+
+        #[serde(default)]
+        orientation: WidgetOrientation,
     },
     Column {
         #[serde(flatten)]
@@ -129,6 +153,14 @@ macro_rules! delegate_base {
         }
     };
 }
+macro_rules! delegate_required_services {
+    ($self:ident, { $($custom_arm:tt)* }, [$($no_service_variant:ident),* $(,)?]) => {
+        match $self {
+            $($custom_arm)*
+            $(Self::$no_service_variant { .. } => 0,)*
+        }
+    };
+}
 impl WidgetSpec {
     pub fn base(&self) -> &WidgetBase {
         delegate_base!(self, [
@@ -148,7 +180,42 @@ impl WidgetSpec {
         self.base().id.as_ref()
     }
     pub fn class(&self) -> Option<&String> {
-        self.base().id.as_ref()
+        self.base().class.as_ref()
+    }
+    pub fn required_services(&self) -> u8 {
+        delegate_required_services!(self,
+            {
+                Self::Battery { .. } => 1 << 0,
+                Self::Slider { func, ..} => {
+                    match func {
+                        SliderFunc::Brightness => {
+                            0
+                        },
+                        SliderFunc::Volume => {
+                            1 << 1
+                        }
+                        SliderFunc::None => {
+                            0
+                        }
+                    }
+                }
+                Self::Row { children, .. } => {
+                    children.iter().map(|c| c.required_services()).reduce(|acc, b| acc | b).unwrap_or(0)
+                }
+                Self::Column { children, .. } => {
+                    children.iter().map(|c| c.required_services()).reduce(|acc, b| acc | b).unwrap_or(0)
+                }
+            },
+            // Empty services
+            [
+                Button,
+                Calendar,
+                Clock,
+                Notifications,
+                Separator,
+                Spacer,
+            ]
+        )
     }
 }
 impl WidgetSpec {
@@ -159,15 +226,24 @@ impl WidgetSpec {
             None
         }
     }
-    pub fn as_slider(&self) -> Option<(&WidgetBase, &SliderFunc, Option<String>, &SliderRange)> {
+    pub fn as_slider(
+        &self,
+    ) -> Option<(
+        &WidgetBase,
+        &SliderFunc,
+        Option<String>,
+        &SliderRange,
+        &WidgetOrientation,
+    )> {
         if let Self::Slider {
             base,
             func,
             icon,
             range,
+            orientation,
         } = self
         {
-            Some((base, func, icon.clone(), range))
+            Some((base, func, icon.clone(), range, orientation))
         } else {
             None
         }
@@ -239,4 +315,12 @@ fn default_battery_threshold() -> u8 {
 pub struct CalendarHMFormat {
     pub event: String,
     pub timeline: String,
+}
+
+#[derive(Debug, Clone, Copy, Deserialize, Serialize, Default, PartialEq, Eq)]
+#[serde(rename_all = "lowercase")]
+pub enum WidgetOrientation {
+    #[default]
+    Vertical,
+    Horizontal,
 }

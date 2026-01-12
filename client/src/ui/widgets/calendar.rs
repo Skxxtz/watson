@@ -6,7 +6,7 @@ use std::{cell::RefCell, rc::Rc, str::FromStr};
 
 use chrono::{Duration, Local, NaiveDate, NaiveDateTime, NaiveTime, Timelike};
 use gtk4::{
-    DrawingArea, GestureClick,
+    Align, DrawingArea, GestureClick,
     cairo::{Context, FontSlant, FontWeight},
     glib::object::ObjectExt,
     prelude::{DrawingAreaExtManual, GestureSingleExt, WidgetExt, WidgetExtManual},
@@ -40,6 +40,7 @@ impl Calendar {
     pub fn new(specs: &WidgetSpec) -> DrawingArea {
         let specs = Rc::new(specs.clone());
         let state = Rc::new(AnimationState::new());
+        let base = specs.base();
 
         let mut height = 400;
 
@@ -59,7 +60,8 @@ impl Calendar {
         let calendar_area = DrawingArea::builder()
             .vexpand(false)
             .hexpand(false)
-            .valign(gtk4::Align::Start)
+            .valign(base.valign.map(|d| d.into()).unwrap_or(Align::Start))
+            .halign(base.halign.map(|d| d.into()).unwrap_or(Align::Start))
             .css_classes(["widget", "calendar"])
             .width_request(400)
             .height_request(height)

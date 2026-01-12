@@ -2,10 +2,22 @@
 /*     background: transparent; */
 /* } */
 
+:root {
+    --background: #181818;
+    --muted: #333333;
+    --accent: #5688c7;
+
+    --text-active: white;
+    --text-inactive: hsl(0, 0%, 20%);
+    
+    --widget-normal-radius: 20px;
+}
+
 window {
     background: transparent;
     padding: 20px;
 }
+
 scrolledwindow overshoot.top,
 scrolledwindow overshoot.bottom,
 scrolledwindow undershoot.top,
@@ -15,28 +27,31 @@ scrolledwindow undershoot.bottom {
     box-shadow: none;
 }
 
-#b{
-    background: #181818;
-    border: 1px solid #333333;
-    border-radius: 20px;
+#b {
+    background: var(--background);
+    border: 1px solid var(--muted);
+    border-radius: var(--widget-normal-radius);
     margin: 10px;
     padding: 15px;
 }
+
 #b .widget {
     border: unset;
     margin: unset;
 }
 
-.widget{
-    margin: 10px;
-    border-radius: 20px;
-    background: #181818;
-    border: 1px solid #333333;
+#b .button {
+    min-height: 50px;
+    min-width: 50px;
 }
-.no-widget {
-    margin: 0px;
-    border-radius: 0px;
-    border: none;
+
+.widget {
+    margin: 10px;
+    border-radius: var(--widget-normal-radius);
+    background: var(--background);
+    box-shadow: 5px 5px 5px 2px rgba(0, 0, 0, 0.3),
+    inset 0px 0px 0px 1px var(--muted),
+    inset 1px 1px 0px 0px rgba(255, 255, 255, 0.3);
 }
 
 .calendar {
@@ -46,50 +61,86 @@ scrolledwindow undershoot.bottom {
 .clock {
     color: rgb(0, 0, 0);
 }
+
 .battery {
     color: rgb(150, 150, 150);
 }
+
 .button {
     color: rgb(150, 150, 150);
     padding: 5px;
 }
+
+
+.button image {
+    -gtk-icon-size: 20px;
+}
+
+.spacer {
+    all: unset;
+    opacity: 0;
+}
+
+.button.active image {
+    transition: 0.2s ease-in-out;
+    color: var(--text-active);
+}
+
+.button.inactive image {
+    transition: 0.2s ease-in;
+    color: gray;
+}
+
+.button.active {
+    transition: 0.3s ease;
+    color: var(--accent);
+}
+
+.button.inactive {
+    transition: 0.3s ease;
+    color: var(--text-inactive);
+}
+
+.separator {
+    background: var(--accent);
+    border-radius: 999px;
+    min-height: 1px;
+    margin: 0px 10px;
+}
+/* Sliders */
+/* ------------- */
 .slider {
     color: #333333;
     border-radius: 999px;
     min-width: 60px;
 }
-.button image {
-    -gtk-icon-size: 20px;
-}
-image.active {
-    transition: 0.2s ease-in-out;
-    color: white;
-}
-image.inactive {
-    transition: 0.2s ease-in;
-    color: gray;
-}
-.separator{
-    background: #333333;
-    border-radius: 999px;
-    min-height: 1px;
-    margin: 0px 10px;
+
+.slider image {
+    color: var(--text-active);
 }
 
-/* ********************************************* */
-/* *************Notifications******************* */
-/* ********************************************* */
+.slider.horizontal {
+    padding: 20px 20px;
+    border-radius: var(--widget-normal-radius);
+}
+.slider.horizontal image {
+    color: alpha(var(--text-active), 0.1);
+}
+
+/* Notifications */
+/* ------------- */
 .notification,
 .notification.prio-low,
 .notification.prio-normal {
-    --notification-background: #181818; 
-    --notification-color: #f8f8f8; 
+    --notification-background: #181818;
+    --notification-color: #f8f8f8;
     --notification-border: #333333;
-    --notification-muted: #BBBBBB; 
+    --notification-muted: #bbbbbb;
 }
+
 .notification.prio-critical {
-    --notification-background: #3A1E1E;
-    --notification-color: hsla(0, 57%, 50.8%, 1.0);
+    --notification-background: #3a1e1e;
+    --notification-color: hsla(0, 57%, 50.8%, 1);
     --notification-border: var(--notification-color);
     --notification-muted: hsla(0, 57%, 50.8%, 0.6);
 }
@@ -120,7 +171,7 @@ image.inactive {
 
 .notification_centre,
 .notification_centre list,
-.notification_centre list > row{
+.notification_centre list>row {
     background: transparent;
     background-color: transparent;
     box-shadow: none;

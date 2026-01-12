@@ -1,9 +1,14 @@
-use common::protocol::{BatteryState, InternalMessage, Request, Response, SocketData};
+use async_trait::async_trait;
+use common::errors::{WatsonError, WatsonErrorKind};
+use common::protocol::{
+    BatteryState, DaemonService, InternalMessage, IntoResponse, Request, Response, SocketData,
+};
+use common::watson_err;
 use futures_util::StreamExt;
-use serde_json;
 use std::collections::HashMap;
 use std::sync::Arc;
-use tokio::sync::RwLockWriteGuard;
+use std::sync::atomic::{AtomicUsize, Ordering};
+use tokio::sync::Notify;
 use tokio::{
     net::{UnixListener, UnixStream},
     sync::{RwLock, broadcast},
@@ -11,28 +16,53 @@ use tokio::{
 use zbus::Connection;
 use zbus::zvariant::OwnedValue;
 
-use common::tokio::AsyncSizedMessage;
+use common::tokio::{AsyncSizedMessage, SizedMessageObj};
 use zbus::conn::Builder;
 
+mod hardware;
 mod notify;
-use crate::notify::{DaemonHandle, NotificationDaemon};
+mod service_reg;
+use notify::{DaemonHandle, NotificationDaemon};
+
+use crate::hardware::SystemStateBuilder;
 
 #[tokio::main]
-async fn main() -> tokio::io::Result<()> {
+async fn main() -> Result<(), WatsonError> {
     let (tx, rx) = broadcast::channel::<InternalMessage>(16);
-    let daemon = Arc::new(RwLock::new(NotificationDaemon::new(tx.clone())));
+    let daemon = Arc::new(RwLock::new(NotificationDaemon::new(tx.clone()).await?));
 
-    let _result = tokio::spawn(battery_state_listener(tx.clone()));
-    let _result = tokio::spawn(dbus_listener(daemon.clone()));
+    let _result = tokio::spawn(battery_state_listener(
+        tx.clone(),
+        Arc::clone(&daemon.read().await.wake_signal),
+        Arc::clone(&daemon),
+    ));
+    let _result = tokio::spawn(dbus_listener(Arc::clone(&daemon)));
 
     // Setup Server
     let _ = std::fs::remove_file(SocketData::SOCKET_ADDR);
-    let listener = UnixListener::bind(SocketData::SOCKET_ADDR)?;
+    let listener = UnixListener::bind(SocketData::SOCKET_ADDR)
+        .map_err(|e| watson_err!(WatsonErrorKind::StreamBind, e.to_string()))?;
 
+    let connection_count = Arc::new(AtomicUsize::new(0));
     loop {
-        let (stream, _) = listener.accept().await?;
+        let (stream, _) = listener
+            .accept()
+            .await
+            .map_err(|e| watson_err!(WatsonErrorKind::StreamConnect, e.to_string()))?;
+        connection_count.fetch_add(1, Ordering::SeqCst);
+
         let rx = rx.resubscribe();
-        tokio::spawn(handle_client(stream, daemon.clone(), rx));
+        tokio::spawn({
+            let daemon_clone = Arc::clone(&daemon);
+            let count_clone = Arc::clone(&connection_count);
+            async move {
+                handle_client(stream, daemon_clone.clone(), rx).await;
+                count_clone.fetch_sub(1, Ordering::SeqCst);
+                if count_clone.load(Ordering::SeqCst) == 0 {
+                    daemon_clone.write().await.register.clear();
+                }
+            }
+        });
     }
 }
 
@@ -51,7 +81,11 @@ async fn dbus_listener(daemon: Arc<RwLock<NotificationDaemon>>) -> zbus::Result<
     Ok(())
 }
 
-async fn battery_state_listener(sender: broadcast::Sender<InternalMessage>) -> zbus::Result<()> {
+async fn battery_state_listener(
+    sender: broadcast::Sender<InternalMessage>,
+    wake_signal: Arc<Notify>,
+    daemon: Arc<RwLock<NotificationDaemon>>,
+) -> zbus::Result<()> {
     let conn = Connection::system().await?;
     let proxy = zbus::Proxy::new(
         &conn,
@@ -65,40 +99,63 @@ async fn battery_state_listener(sender: broadcast::Sender<InternalMessage>) -> z
 
     // Cache to prevent redundant updates
     let mut last_state = BatteryState::Invalid;
+    loop {
+        // Ghost check
+        loop {
+            let active = daemon
+                .read()
+                .await
+                .register
+                .is_active(DaemonService::BatteryStateListener);
 
-    while let Some(signal) = stream.next().await {
-        let (iface, changed, _): (String, HashMap<String, OwnedValue>, Vec<String>) =
-            signal.body().deserialize()?;
-
-        if iface != "org.freedesktop.UPower.Device" {
-            continue;
-        }
-
-        let new_state_raw = changed
-            .get("State")
-            .and_then(|v| TryInto::<u32>::try_into(v).ok());
-
-        let mut changed_significantly = false;
-        if let Some(s) = new_state_raw {
-            let state = match s {
-                1 => BatteryState::Charging,
-                2 => BatteryState::Discharging,
-                3 => BatteryState::Full,
-                _ => BatteryState::Invalid,
-            };
-            if state != last_state {
-                last_state = state;
-                changed_significantly = true;
+            if active {
+                break;
             }
+
+            wake_signal.notified().await;
         }
 
-        // Check for changes
-        if let Ok(percentage) = BatteryState::capacity() {
-            if changed_significantly && last_state != BatteryState::Invalid {
-                let _ = sender.send(InternalMessage::BatteryState {
-                    state: last_state,
-                    percentage,
-                });
+        tokio::select! {
+            next_signal = stream.next() => {
+                let Some(signal) = next_signal else {
+                    break;
+                };
+                let (iface, changed, _): (String, HashMap<String, OwnedValue>, Vec<String>) =
+                                          signal.body().deserialize()?;
+
+                if iface != "org.freedesktop.UPower.Device" {
+                    continue;
+                }
+
+                let new_state_raw = changed
+                    .get("State")
+                    .and_then(|v| TryInto::<u32>::try_into(v).ok());
+
+                let mut changed_significantly = false;
+                if let Some(s) = new_state_raw {
+                    let state = match s {
+                        1 => BatteryState::Charging,
+                        2 => BatteryState::Discharging,
+                        4 => BatteryState::Full,
+                        5 => BatteryState::Charging,
+                        _ => BatteryState::Invalid
+                    };
+                    if state != last_state {
+                        last_state = state;
+                        changed_significantly = true;
+                    }
+                }
+
+                // Check for changes
+                if let Ok(percentage) = BatteryState::capacity() {
+                    if changed_significantly && last_state != BatteryState::Invalid {
+                        let _ = sender.send(InternalMessage::BatteryState {
+                            state: last_state,
+                            percentage,
+                        });
+                    }
+                }
+
             }
         }
     }
@@ -118,17 +175,26 @@ async fn handle_client(
                     Err(_) => break, // Client disconnected
                 };
 
-                let req: Request = match serde_json::from_slice(&buf) {
+                let req: Request = match bincode::deserialize(&buf) {
                     Ok(r) => r,
                     Err(_) => continue,
                 };
 
-                let resp = req.handle(daemon.write().await);
+                let daemon_clone = Arc::clone(&daemon);
 
-                let out = serde_json::to_vec(&resp).unwrap();
-                if stream.write_sized(&out).await.is_err() {
-                    break;
+                let resp = {
+                    let mut daemon_guard = daemon_clone.write().await;
+                    req.handle(&mut *daemon_guard).await
+                };
+
+                if !matches!(resp, Response::Ok) {
+                    if let Ok(out) = SizedMessageObj::from_struct(&resp) {
+                        if stream.write_sized(out).await.is_err() {
+                            break;
+                        }
+                    }
                 }
+
             }
 
             msg = rx.recv() => {
@@ -152,20 +218,23 @@ async fn handle_client(
                     }
                 };
 
-                let out = serde_json::to_vec(&resp).unwrap();
-                if stream.write_sized(&out).await.is_err() {
-                    break;
+                if let Ok(out) = SizedMessageObj::from_struct(&resp) {
+                    if stream.write_sized(out).await.is_err() {
+                        break;
+                    }
                 }
             }
         }
     }
 }
 
+#[async_trait]
 trait RequestHandler {
-    fn handle(self, daemon: RwLockWriteGuard<NotificationDaemon>) -> Response;
+    async fn handle(self, daemon: &mut NotificationDaemon) -> Response;
 }
+#[async_trait]
 impl RequestHandler for Request {
-    fn handle(self, mut daemon: RwLockWriteGuard<NotificationDaemon>) -> Response {
+    async fn handle(self, daemon: &mut NotificationDaemon) -> Response {
         match self {
             Request::Ping => Response::Pong,
             Request::GetStatus => Response::Status {
@@ -181,6 +250,28 @@ impl RequestHandler for Request {
                 daemon.settings.silent = value;
                 Response::Ok
             }
+            Request::RegisterServices(services) => {
+                daemon.register.registered_services(services);
+                println!("Registered required services. {}", daemon.register);
+                // Wake services
+                daemon.wake_signal.notify_one();
+                Response::Ok
+            }
+            Request::SetWifi(enabled) => daemon.hardware.set_wifi(enabled).await.into_response(),
+            Request::SetBluetooth(enabled) => {
+                daemon.hardware.set_bluetooth(enabled).await.into_response()
+            }
+            Request::SetPowerMode(mode) => {
+                daemon.hardware.set_powermode(mode).await.into_response()
+            }
+            Request::SetBacklight(perc) => {
+                daemon.hardware.set_brightness(perc).await.into_response()
+            }
+            Request::SetVolume(perc) => daemon.hardware.set_volume(perc).await.into_response(),
+            Request::SystemState => match SystemStateBuilder::new().await {
+                Ok(state) => Response::SystemState(state),
+                Err(e) => Response::Error(e.message),
+            },
         }
     }
 }

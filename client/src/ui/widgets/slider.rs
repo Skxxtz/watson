@@ -1,12 +1,16 @@
 use crate::{
-    config::WidgetSpec,
+    DAEMON_TX,
+    config::{WidgetOrientation, WidgetSpec},
     ui::{
         g_templates::main_window::MainWindow,
-        widgets::utils::{Rgba, WidgetOption},
+        widgets::utils::{
+            AnimationDirection, AnimationState, CairoShapesExt, EaseFunction, Rgba, WidgetOption,
+        },
     },
 };
+use common::protocol::{Request, SystemState};
 use gtk4::{
-    Box, DrawingArea, GestureClick, GestureDrag, Image, Overlay,
+    Box, DrawingArea, GestureDrag, Image, Overlay,
     cairo::Context,
     glib::{
         WeakRef,
@@ -15,11 +19,15 @@ use gtk4::{
     },
     prelude::{
         BoxExt, DrawingAreaExtManual, EventControllerExt, GestureDragExt, GtkApplicationExt,
-        WidgetExt,
+        WidgetExt, WidgetExtManual,
     },
 };
 use serde::{Deserialize, Serialize};
-use std::{cell::Cell, rc::Rc};
+use std::{
+    cell::{Cell, RefCell},
+    rc::Rc,
+    time::Instant,
+};
 
 #[derive(Clone, Debug)]
 pub struct Slider {
@@ -40,25 +48,34 @@ pub struct SliderBuilder {
     func: SliderFunc,
 }
 impl SliderBuilder {
-    pub fn new(specs: &WidgetSpec, in_holder: bool) -> Self {
-        let specs = Rc::new(specs.clone());
-        let (_, func, icon, range) = specs.as_slider().unwrap();
+    pub fn new(specs: &WidgetSpec, system_state: Rc<SystemState>, in_holder: bool) -> Self {
+        let (_, _, _, _range, orientation) = specs.as_slider().unwrap();
 
-        let perc = Rc::new(Cell::new(0.0));
+        match orientation {
+            WidgetOrientation::Vertical => Self::vertical(specs, system_state, in_holder),
+            WidgetOrientation::Horizontal => Self::horizontal(specs, system_state, in_holder),
+        }
+    }
+    pub fn vertical(specs: &WidgetSpec, system_state: Rc<SystemState>, in_holder: bool) -> Self {
+        let (base, func, icon, _range, _) = specs.as_slider().unwrap();
+
         let icon = icon.unwrap_or(func.icon_name(0.5));
 
         let builder = Overlay::builder()
-            .css_classes(["widget", "slider"])
+            .css_classes(["widget", "slider", "vertical"])
             .overflow(gtk4::Overflow::Hidden)
             .height_request(200)
             .width_request(50);
 
         let overlay = if in_holder {
-            builder.vexpand(true).valign(gtk4::Align::Fill)
+            builder
+                .vexpand(true)
+                .valign(base.valign.map(|d| d.into()).unwrap_or(gtk4::Align::Fill))
+                .halign(base.halign.map(|d| d.into()).unwrap_or(gtk4::Align::Start))
         } else {
             builder
-                .halign(gtk4::Align::Start)
-                .valign(gtk4::Align::Start)
+                .valign(base.valign.map(|d| d.into()).unwrap_or(gtk4::Align::Start))
+                .halign(base.halign.map(|d| d.into()).unwrap_or(gtk4::Align::Start))
         }
         .build();
 
@@ -79,12 +96,141 @@ impl SliderBuilder {
             area.add_css_class(class);
         }
 
-        Slider::connect_clicked(&area, Rc::clone(&perc), *func, svg_icon.downgrade());
-        Slider::connect_drag(&area, Rc::clone(&perc), *func, svg_icon.downgrade());
+        // Setup animations
+        let animation_state = Rc::new(AnimationState::new());
+        area.add_tick_callback({
+            let animation_state = Rc::clone(&animation_state);
+            move |widget, frame_clock| {
+                if !animation_state.running.get() {
+                    return gtk4::glib::ControlFlow::Continue;
+                }
+                animation_state.update(frame_clock);
+                widget.queue_draw();
+                gtk4::glib::ControlFlow::Continue
+            }
+        });
+
+        Slider::connect_drag(
+            &area,
+            Rc::clone(&system_state),
+            *func,
+            WidgetOrientation::Vertical,
+            svg_icon.downgrade(),
+            Rc::clone(&animation_state),
+        );
 
         area.set_draw_func({
+            let func = func.clone();
+            let system_state = Rc::clone(&system_state);
             move |area, ctx, width, height| {
-                Slider::draw(area, ctx, width, height, perc.clone());
+                Slider::draw_vert(
+                    area,
+                    ctx,
+                    width,
+                    height,
+                    Rc::clone(&system_state),
+                    func,
+                    Rc::clone(&animation_state),
+                );
+            }
+        });
+
+        let area_clone = area.downgrade();
+        gtk4::glib::timeout_add_seconds_local(30, {
+            move || {
+                if let Some(clock) = area_clone.upgrade() {
+                    clock.queue_draw();
+                }
+                gtk4::glib::ControlFlow::Continue
+            }
+        });
+
+        Self {
+            ui: WidgetOption::Owned(area),
+            overlay: WidgetOption::Owned(overlay),
+            func: *func,
+        }
+    }
+    pub fn horizontal(specs: &WidgetSpec, system_state: Rc<SystemState>, in_holder: bool) -> Self {
+        let (base, func, _, _range, _) = specs.as_slider().unwrap();
+
+        let builder = Overlay::builder()
+            .css_classes(["widget", "slider", "horizontal"])
+            .hexpand(true)
+            .height_request(50)
+            .width_request(100)
+            .valign(base.valign.map(|d| d.into()).unwrap_or(gtk4::Align::Center))
+            .halign(base.halign.map(|d| d.into()).unwrap_or(gtk4::Align::Fill));
+
+        // TODO: Check styling in and out of holder
+        let overlay = if in_holder { builder } else { builder }.build();
+
+        let icon_left = Image::builder()
+            .icon_name(func.icon_name(0.1))
+            .can_target(false)
+            .build();
+
+        let icon_right = Image::builder()
+            .icon_name(func.icon_name(0.9))
+            .can_target(false)
+            .build();
+
+        let area = DrawingArea::builder().hexpand(true).vexpand(true).build();
+
+        let content = Box::builder()
+            .orientation(gtk4::Orientation::Horizontal)
+            .spacing(5)
+            .hexpand(true)
+            .build();
+        content.append(&icon_left);
+        content.append(&area);
+        content.append(&icon_right);
+
+        overlay.set_child(Some(&content));
+
+        if let Some(id) = specs.id() {
+            area.set_widget_name(id);
+        }
+        if let Some(class) = specs.class() {
+            area.add_css_class(class);
+        }
+
+        // Setup animations
+        let animation_state = Rc::new(AnimationState::new());
+        area.add_tick_callback({
+            let animation_state = Rc::clone(&animation_state);
+            move |widget, frame_clock| {
+                if !animation_state.running.get() {
+                    return gtk4::glib::ControlFlow::Continue;
+                }
+                animation_state.update(frame_clock);
+                widget.queue_draw();
+                gtk4::glib::ControlFlow::Continue
+            }
+        });
+
+        Slider::connect_drag(
+            &area,
+            Rc::clone(&system_state),
+            *func,
+            WidgetOrientation::Horizontal,
+            WeakRef::default(),
+            Rc::clone(&animation_state),
+        );
+
+        area.set_draw_func({
+            let func = func.clone();
+            let system_state = Rc::clone(&system_state);
+            move |area, ctx, width, height| {
+                Slider::draw_horz(
+                    area,
+                    ctx,
+                    width,
+                    height,
+                    Rc::clone(&system_state),
+                    func,
+                    Rc::clone(&animation_state),
+                );
             }
         });
 
@@ -120,82 +266,166 @@ impl SliderBuilder {
 }
 
 impl Slider {
-    fn draw(
+    fn draw_vert(
         _area: &DrawingArea,
         ctx: &Context,
         width: i32,
         height: i32,
-        percentage: Rc<Cell<f32>>,
+        state: Rc<SystemState>,
+        func: SliderFunc,
+        _animation_state: Rc<AnimationState>,
     ) {
         let color: Rgba = _area.color().into();
+        let percentage = func.percentage(&state) as f64 / 100.0;
 
-        let p = percentage.get() as f64;
-
-        let height = height as f64;
-        let width = width as f64;
+        let h = height as f64;
+        let w = width as f64;
+        let fill_height = h * percentage;
+        let y_start = h - fill_height;
 
         // Background
-        let grad = gtk4::cairo::LinearGradient::new(0.0, 0.0, 0.0, height);
-        grad.add_color_stop_rgba(0.0, 0.0, 0.0, 0.0, 0.0);
-        grad.add_color_stop_rgba(1.0 - p, 0.0, 0.0, 0.0, 0.0);
-        grad.add_color_stop_rgba(1.0 - p, color.r, color.g, color.b, 1.0);
-        grad.add_color_stop_rgba(1.0, color.r, color.g, color.b, 1.0);
+        ctx.set_source_rgba(color.r, color.g, color.b, 1.0);
+        ctx.rectangle(0.0, y_start, w, fill_height);
+        ctx.fill().unwrap();
+    }
+    fn draw_horz(
+        _area: &DrawingArea,
+        ctx: &Context,
+        width: i32,
+        height: i32,
+        state: Rc<SystemState>,
+        func: SliderFunc,
+        animation_state: Rc<AnimationState>,
+    ) {
+        let color: Rgba = _area.color().into();
+        let percentage = func.percentage(&state) as f64 / 100.0;
 
-        ctx.set_source(&grad).unwrap();
-        ctx.rectangle(0.0, 0.0, width, height);
+        let progress = animation_state.progress.get();
+
+        let thickness = 5.0 + 2.0 * progress;
+        let h = height as f64;
+        let w = width as f64;
+        let fill_width = w * percentage;
+        let y_start = (h - thickness) / 2.0;
+
+        // Background
+        ctx.set_source_rgba(color.r, color.g, color.b, 1.0);
+        CairoShapesExt::rounded_rectangle(
+            ctx,
+            0.0,
+            y_start,
+            fill_width,
+            thickness,
+            (thickness, thickness, thickness, thickness),
+        );
         ctx.fill().unwrap();
     }
 
-    fn connect_clicked(
+    fn connect_drag(
         target: &DrawingArea,
-        percentage: Rc<Cell<f32>>,
+        system_state: Rc<SystemState>,
         func: SliderFunc,
+        orientation: WidgetOrientation,
         icon: WeakRef<Image>,
+        animation_state: Rc<AnimationState>,
     ) {
-        let click = GestureClick::new();
-        click.connect_pressed({
-            let percentage = Rc::clone(&percentage);
-            let icon = icon.clone();
-            move |gesture, _, _, y| {
-                let target = gesture.widget().and_downcast::<DrawingArea>().unwrap();
-                let height = target.height() as f64;
+        let drag = GestureDrag::new();
+        let perc = func.percentage(&system_state) as f32 / 100.0;
 
-                let new_p = (1.0 - (y / height)).clamp(0.0, 1.0) as f32;
-                percentage.set(new_p);
-                if let Some(icon) = icon.upgrade() {
-                    icon.set_icon_name(Some(&func.icon_name(new_p)));
+        drag.connect_drag_begin({
+            let system_state = Rc::clone(&system_state);
+            let icon = icon.clone();
+            let animation_state = Rc::clone(&animation_state);
+            move |gesture, x, y| {
+                let target = gesture.widget().and_downcast::<DrawingArea>().unwrap();
+                animation_state.start(AnimationDirection::Forward {
+                    duration: 0.05,
+                    function: EaseFunction::EaseIn,
+                });
+
+                let new_p = match orientation {
+                    WidgetOrientation::Vertical => {
+                        let height = target.height() as f64;
+
+                        (1.0 - (y / height)).clamp(0.0, 1.0) as f32
+                    }
+                    WidgetOrientation::Horizontal => {
+                        let width = target.width() as f64;
+                        (x / width).clamp(0.0, 1.0) as f32
+                    }
+                };
+
+                let next_icon = func.icon_name(new_p);
+                if let Some(icon_widget) = icon.upgrade() {
+                    icon_widget.set_icon_name(Some(&next_icon));
                 }
 
+                let new_percent = (new_p * 100.0) as u8;
+                func.execute(new_percent);
+                func.set_percentage(&system_state, new_percent);
                 target.queue_draw();
             }
         });
-        target.add_controller(click);
-    }
-    fn connect_drag(
-        target: &DrawingArea,
-        percentage: Rc<Cell<f32>>,
-        func: SliderFunc,
-        icon: WeakRef<Image>,
-    ) {
-        let drag = GestureDrag::new();
 
         drag.connect_drag_update({
-            let percentage = Rc::clone(&percentage);
-            move |gesture, _x, y| {
+            let system_state = Rc::clone(&system_state);
+            let last_seen_percent = Rc::new(Cell::new(0u8));
+            let last_sent_time = Rc::new(Cell::new(Instant::now()));
+            let last_seen_icon = Rc::new(RefCell::new(func.icon_name(perc)));
+            move |gesture, x, y| {
                 let target = gesture.widget().and_downcast::<DrawingArea>().unwrap();
-                if let Some((_, y_start)) = gesture.start_point() {
-                    let current_y = y_start + y;
-                    let height = target.height() as f64;
 
-                    let new_p = (1.0 - (current_y / height)).clamp(0.0, 1.0) as f32;
-                    percentage.set(new_p);
+                if let Some((x_start, y_start)) = gesture.start_point() {
+                    let new_p = match orientation {
+                        WidgetOrientation::Vertical => {
+                            let current_y = y_start + y;
+                            let height = target.height() as f64;
 
-                    if let Some(icon) = icon.upgrade() {
-                        icon.set_icon_name(Some(&func.icon_name(new_p)));
+                            (1.0 - (current_y / height)).clamp(0.0, 1.0) as f32
+                        }
+                        WidgetOrientation::Horizontal => {
+                            let current_x = x_start + x;
+                            let width = target.width() as f64;
+                            (current_x / width).clamp(0.0, 1.0) as f32
+                        }
+                    };
+
+                    let new_percent = (new_p * 100.0) as u8;
+                    func.set_percentage(&system_state, new_percent);
+                    let now = Instant::now();
+
+                    let elapsed = now.duration_since(last_sent_time.get()).as_millis();
+                    let diff = last_seen_percent.get().abs_diff(new_percent);
+                    if diff >= 1 {
+                        // efficient icon replace logic
+                        let next_icon = func.icon_name(new_p);
+                        if *last_seen_icon.borrow() != next_icon {
+                            if let Some(icon_widget) = icon.upgrade() {
+                                icon_widget.set_icon_name(Some(&next_icon));
+                            }
+                            last_seen_icon.replace(next_icon);
+                        }
+                        target.queue_draw();
+
+                        if elapsed > 100 {
+                            last_seen_percent.set(new_percent);
+                            last_sent_time.set(now);
+                            func.execute(new_percent);
+                        }
                     }
-
-                    target.queue_draw();
                 }
+            }
+        });
+        drag.connect_drag_end({
+            let system_state = Rc::clone(&system_state);
+            let animation_state = Rc::clone(&animation_state);
+            move |_, _, _| {
+                animation_state.start(AnimationDirection::Backward {
+                    duration: 0.1,
+                    function: EaseFunction::EaseOut,
+                });
+                let final_percent = func.percentage(&system_state);
+                func.execute(final_percent);
             }
         });
 
@@ -216,8 +446,9 @@ impl SliderFunc {
         let app = gtk4::Application::default();
         if let Some(window) = app.active_window().and_downcast::<MainWindow>() {
             let state = window.imp().state.borrow();
-            // let buttons = state.slider(*self);
-            // buttons.for_each(|b| b.queue_draw());
+            for slider in state.slider(*self) {
+                slider.queue_draw();
+            }
         }
     }
     pub fn icon_name(&self, percentage: f32) -> String {
@@ -237,6 +468,35 @@ impl SliderFunc {
             Self::None => "none",
         }
         .into()
+    }
+    pub fn execute(&self, percentage: u8) {
+        match self {
+            Self::Brightness => {
+                DAEMON_TX
+                    .get()
+                    .map(|d| d.send(Request::SetBacklight(percentage)));
+            }
+            Self::Volume => {
+                DAEMON_TX
+                    .get()
+                    .map(|d| d.send(Request::SetVolume(percentage)));
+            }
+            Self::None => {}
+        }
+    }
+    pub fn percentage(&self, system_state: &Rc<SystemState>) -> u8 {
+        match self {
+            Self::Brightness => system_state.brightness.get(),
+            Self::Volume => system_state.volume.get(),
+            Self::None => 0,
+        }
+    }
+    pub fn set_percentage(&self, system_state: &Rc<SystemState>, percentage: u8) {
+        match self {
+            Self::Brightness => system_state.brightness.set(percentage),
+            Self::Volume => system_state.volume.set(percentage),
+            Self::None => {}
+        }
     }
 }
 
