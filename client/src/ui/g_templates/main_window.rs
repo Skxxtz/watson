@@ -41,10 +41,8 @@ mod imp {
     impl ApplicationWindowImpl for MainWindow {}
 }
 
-use gtk4::gdk::{Display, Monitor};
 use gtk4::gio::{ActionGroup, ActionMap};
 use gtk4::glib::Object;
-use gtk4::glib::subclass::types::ObjectSubclassIsExt;
 use gtk4::prelude::*;
 
 gtk4::glib::wrapper! {
@@ -60,16 +58,6 @@ impl MainWindow {
         obj.set_application(Some(application));
         obj.set_default_width(width);
         obj.set_opacity(opacity);
-
-        let imp = obj.imp();
-        if let Some(display) = Display::default() {
-            let monitors = display.monitors();
-            if let Some(monitor) = monitors.item(0).and_downcast::<Monitor>() {
-                let geo = monitor.geometry();
-                let max_h = (geo.height() as f32 * 0.9) as i32;
-                imp.viewport_scroll.set_max_content_height(max_h);
-            }
-        }
 
         obj
     }

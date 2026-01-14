@@ -11,6 +11,7 @@ impl WatsonUi {
         win.set_layer(gtk4_layer_shell::Layer::Top);
         win.set_anchor(gtk4_layer_shell::Edge::Top, true);
         win.set_anchor(gtk4_layer_shell::Edge::Right, true);
+        win.set_anchor(gtk4_layer_shell::Edge::Bottom, true);
 
         self.window = win.downgrade();
         win

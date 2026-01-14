@@ -15,7 +15,7 @@
 
 window {
     background: transparent;
-    padding: 20px;
+    padding: 0px 20px;
 }
 
 scrolledwindow overshoot.top,
@@ -28,10 +28,6 @@ scrolledwindow undershoot.bottom {
 }
 
 #b {
-    background: var(--background);
-    border: 1px solid var(--muted);
-    border-radius: var(--widget-normal-radius);
-    margin: 10px;
     padding: 15px;
 }
 
@@ -46,12 +42,12 @@ scrolledwindow undershoot.bottom {
 }
 
 .widget {
-    margin: 10px;
+    margin: 0px 10px 10px 0px;
     border-radius: var(--widget-normal-radius);
     background: var(--background);
-    box-shadow: 5px 5px 5px 2px rgba(0, 0, 0, 0.3),
+    box-shadow: 5px 5px 5px 2px rgba(0, 0, 0, 0.1),
     inset 0px 0px 0px 1px var(--muted),
-    inset 1px 1px 0px 0px rgba(255, 255, 255, 0.3);
+    inset 1px 1px 0px 0px rgba(255, 255, 255, 0.1);
 }
 
 .calendar {
@@ -91,12 +87,18 @@ scrolledwindow undershoot.bottom {
     color: gray;
 }
 
-.button.active {
+.button-obj {
+    min-width: 50px;
+    min-height: 50px;
+    border-radius: 999px;
+}
+
+.button.active .button-obj {
     transition: 0.3s ease;
     color: var(--accent);
 }
 
-.button.inactive {
+.button.inactive .button-obj {
     transition: 0.3s ease;
     color: var(--text-inactive);
 }
@@ -114,17 +116,25 @@ scrolledwindow undershoot.bottom {
     border-radius: 999px;
     min-width: 60px;
 }
+.slider-obj {
+    transition: 0.2s ease;
+    color: var(--text-inactive);
+}
+.slider-obj.moving {
+    transition: 0.2s ease;
+    color: var(--text-active);
+}
 
 .slider image {
     color: var(--text-active);
 }
 
 .slider.horizontal {
-    padding: 20px 20px;
+    padding: 30px 20px;
     border-radius: var(--widget-normal-radius);
 }
 .slider.horizontal image {
-    color: alpha(var(--text-active), 0.1);
+    color: alpha(var(--text-active), 0.4);
 }
 
 /* Notifications */
