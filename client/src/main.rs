@@ -163,7 +163,7 @@ async fn main() -> Result<(), WatsonError> {
     // Make initial requests
     let config = config
         .await
-        .map_err(|e| watson_err!(WatsonErrorKind::JoinError, e.to_string()))??;
+        .map_err(|e| watson_err!(WatsonErrorKind::TaskJoin, e.to_string()))??;
 
     let required_services = config
         .iter()
