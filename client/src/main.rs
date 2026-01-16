@@ -20,15 +20,20 @@ use common::{
     config::flags::ArgParse,
     notification::Notification,
     protocol::{AtomicSystemState, Request, Response, UpdateField},
-    utils::errors::WatsonError,
+    utils::errors::{WatsonError, WatsonErrorKind},
+    watson_err,
 };
+use futures::TryFutureExt;
 use gtk4::{
     CssProvider, DrawingArea,
     gdk::Display,
     glib::{WeakRef, object::ObjectExt, subclass::types::ObjectSubclassIsExt},
     prelude::GtkWindowExt,
 };
-use tokio::sync::{Notify, broadcast, mpsc::UnboundedSender};
+use tokio::{
+    sync::{Notify, broadcast, mpsc::UnboundedSender},
+    task::spawn_blocking,
+};
 
 mod config;
 mod connection;
@@ -64,24 +69,25 @@ async fn main() -> Result<(), WatsonError> {
     let notification_store = Rc::new(RefCell::new(NotificationStore::new()));
 
     gtk4::gio::resources_register_include!("/resources.gresources")
-        .expect("Failed to find resources in OUT_DIR");
+        .expect("Failed to find resources injo OUT_DIR");
 
-    let config = load_config()?;
-    let required_services = config
-        .iter()
-        .map(WidgetSpec::required_services)
-        .reduce(|a, b| a | b)
-        .unwrap_or(0);
+    let config = spawn_blocking(|| load_config());
 
     // Load css
-    let provider = CssProvider::new();
-    let display = Display::default().unwrap();
-    provider.load_from_resource("/dev/skxxtz/watson/main.css");
-    gtk4::style_context_add_provider_for_display(
-        &display,
-        &provider,
-        gtk4::STYLE_PROVIDER_PRIORITY_APPLICATION,
-    );
+    gtk4::glib::idle_add_full(gtk4::glib::Priority::HIGH_IDLE, move || {
+        let provider = CssProvider::new();
+        let display = Display::default().unwrap();
+        provider.load_from_resource("/dev/skxxtz/watson/main.css");
+
+        gtk4::style_context_add_provider_for_display(
+            &display,
+            &provider,
+            gtk4::STYLE_PROVIDER_PRIORITY_APPLICATION,
+        );
+
+        // Return ControlFlow::Break so it only runs once
+        gtk4::glib::ControlFlow::Break
+    });
 
     // Listen async for server responses/notifications
     let ui_ready = Rc::new(Notify::new());
@@ -155,6 +161,16 @@ async fn main() -> Result<(), WatsonError> {
     });
 
     // Make initial requests
+    let config = config
+        .await
+        .map_err(|e| watson_err!(WatsonErrorKind::JoinError, e.to_string()))??;
+
+    let required_services = config
+        .iter()
+        .map(WidgetSpec::required_services)
+        .reduce(|a, b| a | b)
+        .unwrap_or(0);
+
     if let Some(daemon) = DAEMON_TX.get() {
         let _result = daemon.send(Request::RegisterServices(required_services));
     }
