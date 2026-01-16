@@ -160,14 +160,6 @@ impl Button {
                     if let Some(class) = new_state {
                         target.add_css_class(&format!("state-{class}"));
                     }
-
-                    if times.get() == 1 {
-                        target.remove_css_class("inactive");
-                        target.add_css_class("active");
-                    } else {
-                        target.remove_css_class("active");
-                        target.add_css_class("inactive");
-                    }
                 }
             }
         });
