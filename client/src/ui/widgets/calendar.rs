@@ -544,7 +544,7 @@ fn draw_event(
     };
     let neightbor_offset = if has_neighbor_above { 2.5 } else { 0.0 };
 
-    CairoShapesExt::rounded_rectangle(ctx, x, y + neightbor_offset, w, h, rad);
+    CairoShapesExt::rounded_rectangle(ctx, x, y + neightbor_offset, w, h - neightbor_offset, rad);
 
     // Set background
     let grad = gtk4::cairo::LinearGradient::new(x, y, x, y + h);
