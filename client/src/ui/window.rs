@@ -1,4 +1,8 @@
-use gtk4::glib::object::ObjectExt;
+use gtk4::{
+    EventControllerKey,
+    glib::object::ObjectExt,
+    prelude::{GtkWindowExt, WidgetExt},
+};
 use gtk4_layer_shell::LayerShell;
 
 use crate::ui::{WatsonUi, g_templates::main_window::MainWindow};
@@ -12,6 +16,22 @@ impl WatsonUi {
         win.set_anchor(gtk4_layer_shell::Edge::Top, true);
         win.set_anchor(gtk4_layer_shell::Edge::Right, true);
         win.set_anchor(gtk4_layer_shell::Edge::Bottom, true);
+        win.set_keyboard_mode(gtk4_layer_shell::KeyboardMode::Exclusive);
+
+        let controller = EventControllerKey::new();
+        controller.connect_key_pressed({
+            let win = win.downgrade();
+            move |_gesture, key, _keycode, _state| {
+                if key == gtk4::gdk::Key::Escape {
+                    if let Some(win) = win.upgrade() {
+                        win.close();
+                        return gtk4::glib::Propagation::Stop;
+                    }
+                }
+                gtk4::glib::Propagation::Proceed
+            }
+        });
+        win.add_controller(controller);
 
         self.window = win.downgrade();
         win
