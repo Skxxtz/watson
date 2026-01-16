@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use std::{collections::HashMap, time::Instant};
 
 use common::{
     utils::errors::{WatsonError, WatsonErrorKind},
@@ -42,6 +42,68 @@ impl HardwareController {
             .get_property("WirelessEnabled")
             .await
             .map_err(|e| watson_err!(WatsonErrorKind::DBusPropertyGet, e.to_string()))
+    }
+    pub async fn get_wifi_list(&self) -> Result<HashMap<String, u8>, WatsonError> {
+        let proxy = Proxy::new(
+            &self.conn,
+            "org.freedesktop.NetworkManager",
+            "/org/freedesktop/NetworkManager",
+            "org.freedesktop.NetworkManager",
+        )
+        .await
+        .map_err(|e| watson_err!(WatsonErrorKind::ProxyCreate, e.to_string()))?;
+
+        let devices: Vec<zbus::zvariant::OwnedObjectPath> = proxy
+            .call("GetDevices", &())
+            .await
+            .map_err(|e| watson_err!(WatsonErrorKind::DBusProxyCall, e.to_string()))?;
+
+        let mut all_aps: HashMap<String, u8> = HashMap::new();
+        for device_path in devices {
+            let device_proxy = Proxy::new(
+                &self.conn,
+                "org.freedesktop.NetworkManager",
+                &device_path,
+                "org.freedesktop.NetworkManager.Device.Wireless",
+            )
+            .await
+            .map_err(|e| watson_err!(WatsonErrorKind::ProxyCreate, e.to_string()))?;
+
+            // Try to get Access Points (if fails, device is not wireless)
+            if let Ok(ap_paths) = device_proxy
+                .call::<&str, (), Vec<zbus::zvariant::OwnedObjectPath>>("GetAllAccessPoints", &())
+                .await
+            {
+                for ap_path in ap_paths {
+                    let ap_proxy = Proxy::new(
+                        &self.conn,
+                        "org.freedesktop.NetworkManager",
+                        &ap_path,
+                        "org.freedesktop.NetworkManager.AccessPoint",
+                    )
+                    .await
+                    .map_err(|e| watson_err!(WatsonErrorKind::ProxyCreate, e.to_string()))?;
+
+                    // Extract SSID and Strength
+                    // SSID is returned as Vec<u8> because it's not guaranteed to be UTF-8
+                    let ssid_raw: Vec<u8> = ap_proxy.get_property("Ssid").await.unwrap_or_default();
+                    let ssid = String::from_utf8_lossy(&ssid_raw).into_owned();
+                    let strength: u8 = ap_proxy.get_property("Strength").await.unwrap_or(0);
+
+                    if !ssid.is_empty() {
+                        all_aps
+                            .entry(ssid)
+                            .and_modify(|s| {
+                                if strength > *s {
+                                    *s = strength
+                                }
+                            })
+                            .or_insert(strength);
+                    }
+                }
+            }
+        }
+        Ok(all_aps)
     }
     // ----- Bluetooth -----
     /// Requires bluetooth service running
