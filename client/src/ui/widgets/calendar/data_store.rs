@@ -75,17 +75,17 @@ impl CalendarDataStore {
 
         Ok(())
     }
-    pub async fn refresh(&self) {
+    pub async fn refresh(&self) -> usize {
         let mut credential_manager = match CredentialManager::new() {
             Ok(m) => m,
             Err(e) => {
                 eprintln!("{:?}", e);
-                return;
+                return 0;
             }
         };
         if let Err(e) = credential_manager.unlock() {
             eprintln!("{:?}", e);
-            return;
+            return 0;
         }
 
         let today = Local::now().date_naive();
@@ -144,6 +144,7 @@ impl CalendarDataStore {
             {
                 for item in events {
                     if !seen_ids.contains(&item.uid) {
+                        item.seen.set(false);
                         match item.event_type {
                             CalEventType::Timed => new_timed.push(item),
                             CalEventType::AllDay => new_allday.push(item),
@@ -152,12 +153,15 @@ impl CalendarDataStore {
                 }
             }
         }
+        let num_changes = new_timed.len() + new_allday.len();
+        if num_changes > 0 {
+            {
+                self.timed.borrow_mut().extend(new_timed);
+                self.allday.borrow_mut().extend(new_allday);
+            }
 
-        {
-            self.timed.borrow_mut().extend(new_timed);
-            self.allday.borrow_mut().extend(new_allday);
+            let _ = self.save_to_cache();
         }
-
-        let _ = self.save_to_cache();
+        num_changes
     }
 }

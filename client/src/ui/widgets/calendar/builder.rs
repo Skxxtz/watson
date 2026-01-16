@@ -246,34 +246,37 @@ impl CalendarBuilder {
     /// will fail.
     fn attatch_refresh(&self) {
         // Draw first events once the stack shows
-        self.stack.connect_map({
-            let data_store = Rc::clone(&self.data_store);
-            let animation_state = Rc::clone(&self.animation_state);
-            move |_| {
-                let _ = data_store.load_from_cache();
-                animation_state.start(AnimationDirection::Forward {
-                    duration: 0.0,
-                    function: EaseFunction::None,
-                });
-            }
+        let _ = self.data_store.load_from_cache();
+        self.animation_state.start(AnimationDirection::Forward {
+            duration: 0.0,
+            function: EaseFunction::None,
         });
 
         // Get the calendar events async once the application finished starting up
         gtk4::glib::idle_add_local_full(gtk4::glib::Priority::LOW, {
             let animation_state = Rc::clone(&self.animation_state);
             let data_store = Rc::clone(&self.data_store);
+            let context = Rc::clone(&self.context);
             move || {
                 gtk4::glib::MainContext::default().spawn_local({
                     let animation_state = Rc::clone(&animation_state);
                     let data_store = Rc::clone(&data_store);
+                    let context = Rc::clone(&context);
                     async move {
-                        let _ = data_store.refresh().await;
-
-                        // Internally ques draw
-                        animation_state.start(AnimationDirection::Forward {
-                            duration: 0.7,
-                            function: EaseFunction::EaseOutCubic,
-                        });
+                        let num_changes = data_store.refresh().await;
+                        if num_changes > 0 {
+                            let mut context = context.borrow_mut();
+                            context.cache.hitboxes = CalendarCache::calculate_hitboxes(
+                                &*data_store.timed.borrow(),
+                                &context,
+                            );
+                            context.cache.last_window_start = context.window_start;
+                            // Internally ques draw
+                            animation_state.start(AnimationDirection::Forward {
+                                duration: 0.7,
+                                function: EaseFunction::EaseOutCubic,
+                            });
+                        }
                     }
                 });
                 gtk4::glib::ControlFlow::Break
