@@ -1,25 +1,24 @@
 use std::{
-    cell::RefCell,
+    cell::{RefCell},
     collections::HashMap,
     env,
     rc::Rc,
-    sync::{Arc, OnceLock},
+    sync::{Arc, OnceLock, RwLock},
 };
+use once_cell::sync::OnceCell;
 
 use crate::{
     config::{WidgetSpec, load_config},
     connection::ClientConnection,
     ui::{
-        WatsonUi,
-        widgets::{BackendFunc, Battery, NotificationCentre, WatsonWidget, create_widgets},
+        WatsonUi, utils::icon_loader::{CustomIconTheme, IconThemeGuard}, widgets::{BackendFunc, Battery, NotificationCentre, WatsonWidget, create_widgets}
     },
 };
 use common::{
     config::flags::ArgParse,
     notification::Notification,
     protocol::{AtomicSystemState, Request, Response, UpdateField},
-    utils::errors::{WatsonError, WatsonErrorKind},
-    watson_err,
+    utils::errors::WatsonError,
 };
 use gtk4::{
     CssProvider, DrawingArea,
@@ -29,7 +28,6 @@ use gtk4::{
 };
 use tokio::{
     sync::{Notify, broadcast, mpsc::UnboundedSender},
-    task::spawn_blocking,
 };
 
 mod config;
@@ -37,6 +35,7 @@ mod connection;
 mod ui;
 
 static DAEMON_TX: OnceLock<UnboundedSender<Request>> = OnceLock::new();
+static ICONS: OnceCell<RwLock<CustomIconTheme>> = OnceCell::new();
 
 #[tokio::main]
 async fn main() -> Result<(), WatsonError> {
@@ -65,10 +64,13 @@ async fn main() -> Result<(), WatsonError> {
 
     let notification_store = Rc::new(RefCell::new(NotificationStore::new()));
 
+    let config = load_config()?;
+
     gtk4::gio::resources_register_include!("/resources.gresources")
         .expect("Failed to find resources injo OUT_DIR");
 
-    let config = spawn_blocking(|| load_config());
+    let _ = ICONS.set(RwLock::new(CustomIconTheme::new()));
+    let _ = IconThemeGuard::add_path("~/.config/watson/icons/");
 
     // Load css
     gtk4::glib::idle_add_full(gtk4::glib::Priority::HIGH_IDLE, move || {
@@ -159,10 +161,6 @@ async fn main() -> Result<(), WatsonError> {
     });
 
     // Make initial requests
-    let config = config
-        .await
-        .map_err(|e| watson_err!(WatsonErrorKind::TaskJoin, e.to_string()))??;
-
     let required_services = config
         .iter()
         .map(WidgetSpec::required_services)

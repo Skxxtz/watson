@@ -91,4 +91,6 @@ pub enum WatsonErrorKind {
 
     Audio,
     Todo,
+
+    ConfigError,
 }

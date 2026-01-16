@@ -481,9 +481,9 @@ impl BackendFunc {
             }),
             Self::Powermode => Box::new(CycleButton {
                 icons: &[
-                    "battery-profile-powersave-symbolic",
-                    "battery-ac-adapter-symbolic",
-                    "battery-profile-performance-symbolic",
+                    "watson-leaf-symbolic",
+                    "watson-scale-symbolic",
+                    "watson-bunny-symbolic",
                 ],
                 max_states: 3,
                 field: |s| &s.powermode,
@@ -509,7 +509,7 @@ impl BackendFunc {
                     "audio-volume-muted-symbolic",
                 ],
                 field: |s| &s.volume,
-                request_builder: |v| Request::SetBacklight(v),
+                request_builder: |v| Request::SetVolume(v),
                 func: self,
             }),
 

@@ -5,5 +5,7 @@
 <file alias="ui/event_details.ui">ui/event_details.ui</file>
 <file alias="ui/window.ui">ui/window.ui</file>
 <file alias="ui/notification_centre.ui">ui/notification_centre.ui</file></gresource>
-    <gresource prefix="/org/gtk/libgtk/icons/"></gresource>
+    <gresource prefix="/org/gtk/libgtk/icons/"><file alias="watson-leaf-symbolic.svg">icons/watson-leaf-symbolic.svg</file>
+<file alias="watson-scale-symbolic.svg">icons/watson-scale-symbolic.svg</file>
+<file alias="watson-bunny-symbolic.svg">icons/watson-bunny-symbolic.svg</file></gresource>
 </gresources>
