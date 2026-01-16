@@ -23,7 +23,6 @@ use common::{
     utils::errors::{WatsonError, WatsonErrorKind},
     watson_err,
 };
-use futures::TryFutureExt;
 use gtk4::{
     CssProvider, DrawingArea,
     gdk::Display,
