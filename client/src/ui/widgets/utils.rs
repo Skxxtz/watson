@@ -1,22 +1,17 @@
-use common::protocol::{AtomicSystemState, PowerMode, Request};
+use common::protocol::Request;
 use gtk4::{
     cairo::Context,
     gdk::{FrameClock, RGBA},
     glib::{
         WeakRef,
-        object::{CastNone, ObjectExt, ObjectType},
-        subclass::types::ObjectSubclassIsExt,
+        object::{ObjectExt, ObjectType},
     },
-    prelude::GtkApplicationExt,
 };
 use serde::{Deserialize, Serialize};
-use std::{
-    cell::Cell,
-    str::FromStr,
-    sync::{Arc, atomic::Ordering},
-};
+use std::{cell::Cell, str::FromStr, sync::atomic::Ordering};
+use strum::Display;
 
-use crate::{DAEMON_TX, ui::g_templates::main_window::MainWindow};
+use crate::ui::widgets::interactives::{CycleButton, RangeBehavior, ToggleButton, WidgetBehavior};
 
 pub struct CairoShapesExt;
 impl CairoShapesExt {
@@ -434,7 +429,8 @@ impl<T: ObjectType> WidgetOption<T> {
 }
 
 // ----- Backend Functions
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, Serialize, Default, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, Serialize, Default, Hash, Display)]
+#[strum(serialize_all = "lowercase")]
 #[serde(rename_all = "lowercase")]
 pub enum BackendFunc {
     #[default]
@@ -451,110 +447,70 @@ pub enum BackendFunc {
     Brightness,
 }
 impl BackendFunc {
-    pub fn update_widgets(&self) {
-        let app = gtk4::Application::default();
-        if let Some(window) = app.active_window().and_downcast::<MainWindow>() {
-            let state = window.imp().state.borrow();
-            let buttons = state.button(*self);
-            buttons.for_each(|b| b.queue_draw());
-        }
-    }
-    pub fn icon_name(&self, percentage: f32) -> String {
+    pub fn build(self) -> Box<dyn WidgetBehavior> {
         match self {
-            Self::None => "none",
+            Self::Wifi => Box::new(ToggleButton {
+                icon: "network-wireless-signal-excellent-symbolic",
+                getter: |s| s.wifi.load(Ordering::Relaxed),
+                setter: |s, v| s.wifi.store(v, Ordering::Relaxed),
+                request_builder: |v| Request::SetWifi(v),
+                func: self,
+            }),
+            Self::Bluetooth => Box::new(ToggleButton {
+                icon: "bluetooth-symbolic",
+                getter: |s| s.bluetooth.load(Ordering::Relaxed),
+                setter: |s, v| s.bluetooth.store(v, Ordering::Relaxed),
+                request_builder: |v| Request::SetBluetooth(v),
+                func: self,
+            }),
+            Self::Dnd => Box::new(ToggleButton {
+                icon: "weather-clear-night-symbolic",
+                getter: |s| s.dnd.load(Ordering::Relaxed),
+                setter: |s, v| s.dnd.store(v, Ordering::Relaxed),
+                request_builder: |_v| Request::Ping,
+                func: self,
+            }),
+            Self::Powermode => Box::new(CycleButton {
+                icons: &[
+                    "power-profile-power-saver-symbolic",
+                    "power-profile-balanced-symbolic",
+                    "power-profile-performance-symbolic",
+                ],
+                max_states: 3,
+                field: |s| &s.powermode,
+                request_builder: |v| Request::SetPowerMode(v),
+                func: self,
+            }),
+            Self::Brightness => Box::new(RangeBehavior {
+                icons: &[
+                    "display-brightness-high-symbolic",
+                    "display-brightness-medium-symbolic",
+                    "display-brightness-low-symbolic",
+                    "display-brightness-off-symbolic",
+                ],
+                field: |s| &s.brightness,
+                request_builder: |v| Request::SetBacklight(v),
+                func: self,
+            }),
+            Self::Volume => Box::new(RangeBehavior {
+                icons: &[
+                    "audio-volume-high-symbolic",
+                    "audio-volume-medium-symbolic",
+                    "audio-volume-low-symbolic",
+                    "audio-volume-muted-symbolic",
+                ],
+                field: |s| &s.volume,
+                request_builder: |v| Request::SetBacklight(v),
+                func: self,
+            }),
 
-            // Buttons
-            Self::Wifi => "network-wireless-signal-excellent-symbolic",
-            Self::Bluetooth => "bluetooth-symbolic",
-            Self::Powermode => "power-profile-power-saver-symbolic",
-            Self::Dnd => "weather-clear-night-symbolic",
-
-            // Sliders
-            Self::Volume => match percentage {
-                p if p > 0.67 => "audio-volume-high-symbolic",
-                p if p > 0.34 => "audio-volume-medium-symbolic",
-                p if p > 0.01 => "audio-volume-low-symbolic",
-                _ => "audio-volume-muted-symbolic",
-            },
-            Self::Brightness => match percentage {
-                p if p > 0.67 => "display-brightness-high-symbolic",
-                p if p > 0.34 => "display-brightness-medium-symbolic",
-                p if p > 0.01 => "display-brightness-low-symbolic",
-                _ => "display-brightness-off-symbolic",
-            },
-        }
-        .into()
-    }
-    pub fn execute(&self, state: Arc<AtomicSystemState>) {
-        match self {
-            // Button
-            BackendFunc::Wifi => {
-                let target = !state.wifi.load(Ordering::Relaxed);
-                DAEMON_TX.get().map(|d| d.send(Request::SetWifi(target)));
-                state.wifi.store(target, Ordering::Relaxed);
-            }
-            BackendFunc::Bluetooth => {
-                let target = !state.bluetooth.load(Ordering::Relaxed);
-                DAEMON_TX
-                    .get()
-                    .map(|d| d.send(Request::SetBluetooth(target)));
-                state.bluetooth.store(target, Ordering::Relaxed);
-            }
-            BackendFunc::Powermode => {
-                let target = state.powermode.load(Ordering::Relaxed) ^ 1;
-                DAEMON_TX
-                    .get()
-                    .map(|d| d.send(Request::SetPowerMode(target)));
-                state.powermode.store(target, Ordering::Relaxed);
-            }
-
-            // Sliders
-            Self::Brightness => {
-                let target = state.brightness.load(Ordering::Relaxed);
-                DAEMON_TX
-                    .get()
-                    .map(|d| d.send(Request::SetBacklight(target)));
-            }
-            Self::Volume => {
-                let target = state.volume.load(Ordering::Relaxed);
-                DAEMON_TX.get().map(|d| d.send(Request::SetVolume(target)));
-            }
-            _ => {}
-        }
-    }
-    pub fn percentage(&self, system_state: &Arc<AtomicSystemState>) -> u8 {
-        match self {
-            // Buttons
-            BackendFunc::Wifi => system_state.wifi.load(Ordering::Relaxed) as u8,
-            BackendFunc::Bluetooth => system_state.bluetooth.load(Ordering::Relaxed) as u8,
-            BackendFunc::Powermode => {
-                (PowerMode::from(system_state.powermode.load(Ordering::Relaxed))
-                    == PowerMode::PowerSave) as u8
-            }
-            BackendFunc::Dnd => 0,
-
-            // Slider
-            Self::Brightness => system_state.brightness.load(Ordering::Relaxed),
-            Self::Volume => system_state.volume.load(Ordering::Relaxed),
-
-            Self::None => 0,
-        }
-    }
-    pub fn set_percentage(&self, system_state: &Arc<AtomicSystemState>, percentage: u8) {
-        match self {
-            // Buttons
-            BackendFunc::Wifi => system_state.wifi.store(percentage != 0, Ordering::Relaxed),
-            BackendFunc::Bluetooth => system_state
-                .bluetooth
-                .store(percentage != 0, Ordering::Relaxed),
-            BackendFunc::Powermode => system_state.powermode.store(percentage, Ordering::Relaxed),
-            BackendFunc::Dnd => {}
-
-            // Slider
-            Self::Brightness => system_state.brightness.store(percentage, Ordering::Relaxed),
-            Self::Volume => system_state.volume.store(percentage, Ordering::Relaxed),
-
-            Self::None => {}
+            Self::None => Box::new(ToggleButton {
+                icon: "",
+                getter: |_| false,
+                setter: |_, _| {},
+                request_builder: |_| Request::Ping,
+                func: self,
+            }),
         }
     }
 }

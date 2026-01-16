@@ -1,20 +1,22 @@
 use crate::{
     config::WidgetSpec,
-    ui::widgets::utils::{BackendFunc, Rgba, WidgetOption},
+    ui::widgets::{interactives::WidgetBehavior, utils::Rgba},
 };
 use common::protocol::AtomicSystemState;
 use gtk4::{
-    Box, DrawingArea, GestureClick, Image, Overlay,
+    Box as GtkBox, DrawingArea, GestureClick, Image, Overlay, Widget,
     cairo::Context,
-    glib::{WeakRef, object::ObjectExt},
+    glib::{
+        WeakRef,
+        object::{Cast, ObjectExt},
+    },
     prelude::{BoxExt, DrawingAreaExtManual, WidgetExt},
 };
 use std::{rc::Rc, sync::Arc};
 
-#[derive(Clone, Debug)]
 pub struct Button {
-    pub weak: WeakRef<DrawingArea>,
-    pub func: BackendFunc,
+    pub weak: WeakRef<Widget>,
+    pub func: Box<dyn WidgetBehavior>,
 }
 impl Button {
     pub fn queue_draw(&self) {
@@ -25,20 +27,23 @@ impl Button {
 }
 
 pub struct ButtonBuilder {
-    ui: WidgetOption<DrawingArea>,
-    overlay: WidgetOption<Overlay>,
-    func: BackendFunc,
+    area: DrawingArea,
+    overlay: Overlay,
+    func: Box<dyn WidgetBehavior>,
 }
 impl ButtonBuilder {
     pub fn new(specs: &WidgetSpec, system_state: Arc<AtomicSystemState>, in_holder: bool) -> Self {
         let specs = Rc::new(specs.clone());
         let (base, func, icon) = specs.as_button().unwrap();
+        let func = func.build();
 
-        let perc = func.percentage(&system_state);
-        let icon = icon.unwrap_or(func.icon_name(perc as f32 / 100.0));
+        let perc = func.get_percentage(&system_state);
 
-        let initial_class = if perc == 1 { "active" } else { "inactive" };
-        let builder = Overlay::builder().css_classes(["button", initial_class]);
+        let icon = icon.unwrap_or(func.icon_name(perc).to_string());
+
+        let initial_class = format!("state-{perc}");
+        let builder =
+            Overlay::builder().css_classes(["button", &initial_class, &func.func().to_string()]);
 
         let overlay = if in_holder {
             builder
@@ -57,7 +62,7 @@ impl ButtonBuilder {
         }
         .build();
 
-        let button_holder = Box::builder()
+        let button_holder = GtkBox::builder()
             .hexpand(true)
             .vexpand(true)
             .can_target(false)
@@ -100,22 +105,20 @@ impl ButtonBuilder {
             }
         });
 
-        Button::connect_clicked(&overlay, *func, system_state);
+        Button::connect_clicked(&overlay, &func, system_state);
 
         Self {
-            ui: WidgetOption::Owned(area),
-            overlay: WidgetOption::Owned(overlay),
-            func: *func,
+            area,
+            overlay,
+            func,
         }
     }
-    pub fn for_box(mut self, container: &Box) -> Self {
-        if let Some(wid) = self.overlay.take() {
-            container.append(&wid);
-        }
+    pub fn for_box(self, container: &GtkBox) -> Self {
+        container.append(&self.overlay);
         self
     }
     pub fn build(self) -> Button {
-        let weak = self.ui.downgrade();
+        let weak = self.area.upcast::<Widget>().downgrade();
         Button {
             weak,
             func: self.func,
@@ -124,24 +127,40 @@ impl ButtonBuilder {
 }
 
 impl Button {
-    fn draw(_area: &DrawingArea, ctx: &Context, width: i32, height: i32) {
-        let color: Rgba = _area.color().into();
-
+    fn draw(area: &DrawingArea, ctx: &Context, width: i32, height: i32) {
+        let color: Rgba = area.color().into();
         ctx.set_source_rgba(color.r, color.g, color.b, color.a);
         ctx.rectangle(0.0, 0.0, width as f64, height as f64);
         ctx.fill().unwrap();
     }
 
-    fn connect_clicked(target: &Overlay, func: BackendFunc, system_state: Arc<AtomicSystemState>) {
+    fn connect_clicked(
+        target: &Overlay,
+        func: &Box<dyn WidgetBehavior>,
+        system_state: Arc<AtomicSystemState>,
+    ) {
         let click = GestureClick::new();
-        let times = std::cell::Cell::new(func.percentage(&system_state));
+        let times = std::cell::Cell::new(func.get_percentage(&system_state));
         click.connect_pressed({
             let target = target.downgrade();
             let state = Arc::clone(&system_state);
+            let func = func.clone();
             move |_gesture, _, _, _| {
-                func.execute(Arc::clone(&state));
+                let new_state = func.execute(&state);
                 times.set(times.get() ^ 1);
                 if let Some(target) = target.upgrade() {
+                    let state_class = target
+                        .css_classes()
+                        .iter()
+                        .find(|s| s.starts_with("state-"))
+                        .map(|v| v.to_string());
+                    if let Some(class) = state_class {
+                        target.remove_css_class(&class);
+                    }
+                    if let Some(class) = new_state {
+                        target.add_css_class(&format!("state-{class}"));
+                    }
+
                     if times.get() == 1 {
                         target.remove_css_class("inactive");
                         target.add_css_class("active");
@@ -150,7 +169,6 @@ impl Button {
                         target.add_css_class("inactive");
                     }
                 }
-                func.update_widgets();
             }
         });
         target.add_controller(click);

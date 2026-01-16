@@ -11,9 +11,7 @@ use crate::{
     connection::ClientConnection,
     ui::{
         WatsonUi,
-        widgets::{
-            BackendFunc, Battery, Button, NotificationCentre, Slider, WatsonWidget, create_widgets,
-        },
+        widgets::{BackendFunc, Battery, NotificationCentre, WatsonWidget, create_widgets},
     },
 };
 use common::{
@@ -27,7 +25,7 @@ use gtk4::{
     CssProvider, DrawingArea,
     gdk::Display,
     glib::{WeakRef, object::ObjectExt, subclass::types::ObjectSubclassIsExt},
-    prelude::GtkWindowExt,
+    prelude::{GtkWindowExt, WidgetExt},
 };
 use tokio::{
     sync::{Notify, broadcast, mpsc::UnboundedSender},
@@ -107,23 +105,23 @@ async fn main() -> Result<(), WatsonError> {
                             ui_ready.notify_one();
                         }
                         if mask & (1 << UpdateField::Wifi as u8) != 0 {
-                            state_ref.button(BackendFunc::Wifi).for_each(|c| c.queue_draw());
+                            state_ref.notify_update(BackendFunc::Wifi);
                         }
 
                         if mask & (1 << UpdateField::Bluetooth as u8) != 0 {
-                            state_ref.button(BackendFunc::Bluetooth).for_each(|c| c.queue_draw());
+                            state_ref.notify_update(BackendFunc::Bluetooth);
                         }
 
                         if mask & (1 << UpdateField::Powermode as u8) != 0 {
-                            state_ref.button(BackendFunc::Powermode).for_each(|c| c.queue_draw());
+                            state_ref.notify_update(BackendFunc::Powermode);
                         }
 
                         if mask & (1 << UpdateField::Brightness as u8) != 0 {
-                            state_ref.slider(BackendFunc::Brightness).for_each(|c| c.queue_draw());
+                            state_ref.notify_update(BackendFunc::Brightness);
                         }
 
                         if mask & (1 << UpdateField::Volume as u8) != 0 {
-                            state_ref.slider(BackendFunc::Volume).for_each(|c| c.queue_draw());
+                            state_ref.notify_update(BackendFunc::Volume);
                         }
                     }
                     Ok(msg) = rx.recv() => {
@@ -212,8 +210,7 @@ pub struct WatsonState {
     system_state: Arc<AtomicSystemState>,
 
     widgets: Vec<WatsonWidget>,
-    buttons: HashMap<BackendFunc, Vec<Button>>,
-    sliders: HashMap<BackendFunc, Vec<Slider>>,
+    subscribers: HashMap<BackendFunc, Vec<WeakRef<gtk4::Widget>>>,
 }
 #[allow(dead_code)]
 impl WatsonState {
@@ -222,17 +219,22 @@ impl WatsonState {
             system_state: Arc::new(AtomicSystemState::default()),
 
             widgets: Vec::new(),
-            buttons: HashMap::new(),
-            sliders: HashMap::new(),
+            subscribers: HashMap::new(),
         }
     }
-    pub fn register_widge(&mut self, widget: WatsonWidget) {
+    pub fn register_widget(&mut self, widget: WatsonWidget) {
         match widget {
             WatsonWidget::Button(b) => {
-                self.buttons.entry(b.func).or_default().push(b);
+                self.subscribers
+                    .entry(b.func.func())
+                    .or_default()
+                    .push(b.weak);
             }
             WatsonWidget::Slider(s) => {
-                self.sliders.entry(s.func).or_default().push(s);
+                self.subscribers
+                    .entry(s.func.func())
+                    .or_default()
+                    .push(s.weak);
             }
             _ => {}
         }
@@ -273,11 +275,12 @@ impl WatsonState {
             }
         })
     }
-    pub fn button(&self, func: BackendFunc) -> impl Iterator<Item = &Button> {
-        self.buttons.get(&func).into_iter().flat_map(|v| v.iter())
-    }
-    pub fn slider(&self, func: BackendFunc) -> impl Iterator<Item = &Slider> {
-        self.sliders.get(&func).into_iter().flat_map(|v| v.iter())
+    pub fn notify_update(&self, func: BackendFunc) {
+        if let Some(subs) = self.subscribers.get(&func) {
+            subs.iter()
+                .filter_map(|w| w.upgrade())
+                .for_each(|widget| widget.queue_draw());
+        }
     }
 }
 

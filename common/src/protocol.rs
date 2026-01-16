@@ -74,6 +74,7 @@ pub struct AtomicSystemState {
     pub initialized: AtomicBool,
     pub updated: AtomicU8,
     pub wifi: AtomicBool,
+    pub dnd: AtomicBool,
     pub bluetooth: AtomicBool,
     pub powermode: AtomicU8,
     pub brightness: AtomicU8,

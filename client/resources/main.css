@@ -6,6 +6,8 @@
     --background: #181818;
     --muted: #333333;
     --accent: #5688c7;
+    --orange: #BF5D32;
+    --green: #567B45;
 
     --text-100: hsl(0, 0%, 100%);
     --text-90: hsl(0, 0%, 90%);
@@ -149,31 +151,49 @@ scrolledwindow undershoot.bottom {
     opacity: 0;
 }
 
-.button.active image {
+.button.state-1 image {
     transition: 0.2s ease-in-out;
     color: var(--text-80);
 }
 
-.button.inactive image {
+.button.state-0 image {
     transition: 0.2s ease-in;
     color: gray;
 }
 
 .button-obj {
+    transition: 0.3s ease;
     min-width: 50px;
     min-height: 50px;
     border-radius: 999px;
 }
 
-.button.active .button-obj {
-    transition: 0.3s ease;
+.button.state-1 .button-obj {
     color: var(--accent);
 }
-
-.button.inactive .button-obj {
-    transition: 0.3s ease;
+.button.state-0 .button-obj {
     color: var(--text-20);
 }
+
+.button.powermode.state-0 .button-obj {
+    color: var(--green);
+}
+.button.powermode.state-0 image {
+    color: var(--background);
+}
+.button.powermode.state-1 .button-obj {
+    color: var(--text-20);
+}
+.button.powermode.state-1 image {
+    color: gray;
+}
+.button.powermode.state-2 .button-obj {
+    color: var(--orange);
+}
+.button.powermode.state-2 image {
+    color: var(--background);
+}
+
 
 /* Sliders */
 /* ------------- */

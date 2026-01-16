@@ -248,8 +248,8 @@ impl CalendarBuilder {
         // Draw first events once the stack shows
         let _ = self.data_store.load_from_cache();
         self.animation_state.start(AnimationDirection::Forward {
-            duration: 0.0,
-            function: EaseFunction::None,
+            duration: 0.7,
+            function: EaseFunction::EaseOutCubic,
         });
 
         // Get the calendar events async once the application finished starting up

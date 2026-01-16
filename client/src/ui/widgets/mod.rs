@@ -2,6 +2,7 @@ mod battery;
 mod button;
 pub mod calendar;
 mod clock;
+mod interactives;
 mod notifications;
 mod slider;
 mod utils;
@@ -210,7 +211,6 @@ macro_rules! define_widgets {
             $($name),*
         }
 
-        #[derive(Debug, Clone)]
         pub enum WatsonWidget {
             $($name($data)),*
         }
