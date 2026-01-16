@@ -116,7 +116,7 @@ impl BatteryBuilder {
         self
     }
     pub fn build(self) -> Battery {
-        let weak = self.ui.weak();
+        let weak = self.ui.downgrade();
         Battery {
             weak,
             status: self.status,

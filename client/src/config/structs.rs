@@ -5,7 +5,10 @@ use common::utils::errors::{WatsonError, WatsonErrorKind};
 use common::watson_err;
 use serde::{Deserialize, Serialize};
 
-use crate::ui::widgets::{BackendFunc, CalendarConfig, HandStyle, SliderRange};
+use crate::ui::widgets::{
+    BackendFunc, HandStyle, SliderRange,
+    calendar::types::{CalendarConfig, CalendarHMFormat, CalendarRule},
+};
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct WidgetBase {
@@ -71,7 +74,7 @@ pub enum WidgetSpec {
         #[serde(default = "default_calendar_hours_fut")]
         hours_future: u8,
 
-        #[serde(default = "default_hm_format")]
+        #[serde(default)]
         hm_format: CalendarHMFormat,
     },
     Clock {
@@ -217,7 +220,7 @@ impl WidgetSpec {
     }
 }
 impl WidgetSpec {
-    pub fn as_calendar<'w>(&'w self, default_format: &'w CalendarHMFormat) -> CalendarConfig<'w> {
+    pub fn as_calendar<'w>(&'w self) -> CalendarConfig<'w> {
         match self {
             WidgetSpec::Calendar {
                 accent_color,
@@ -229,14 +232,14 @@ impl WidgetSpec {
             } => CalendarConfig {
                 accent_color,
                 font,
-                hm_format,
+                hm_format: Some(hm_format),
                 hours_past: *hours_past,
                 hours_future: *hours_future,
             },
             _ => CalendarConfig {
                 accent_color: "#e9a949",
                 font: "Sans",
-                hm_format: default_format,
+                hm_format: None,
                 hours_past: 2,
                 hours_future: 6,
             },
@@ -273,25 +276,6 @@ impl WidgetSpec {
     }
 }
 
-#[derive(Debug, Clone, Deserialize, Serialize)]
-#[serde(rename_all = "lowercase")]
-pub enum CalendarRule {
-    /// Show all except these specific calendars.
-    Exclude(Vec<String>),
-    /// Standard filter: show only these specific calendars.
-    Include(Vec<String>),
-    /// Exclusive: show ONLY these and strictly nothing else (same logic as Include, but clearer intent).
-    Only(Vec<String>),
-}
-impl CalendarRule {
-    pub fn is_allowed(&self, name: &str) -> bool {
-        match self {
-            Self::Only(r) | Self::Include(r) => r.iter().any(|s| s == name),
-            Self::Exclude(r) => !r.iter().any(|s| s == name),
-        }
-    }
-}
-
 pub fn load_config() -> Result<Vec<WidgetSpec>, WatsonError> {
     let home = std::env::var("HOME").unwrap();
     let loc = PathBuf::from(home).join(".config/watson/fallback.json");
@@ -317,12 +301,6 @@ fn default_calendar_hours_past() -> u8 {
 fn default_calendar_hours_fut() -> u8 {
     8
 }
-fn default_hm_format() -> CalendarHMFormat {
-    CalendarHMFormat {
-        event: "%H:%M".into(),
-        timeline: "%H:%M".into(),
-    }
-}
 fn default_battery_gradient() -> [String; 3] {
     [
         "#68A357".to_string(),
@@ -332,12 +310,6 @@ fn default_battery_gradient() -> [String; 3] {
 }
 fn default_battery_threshold() -> u8 {
     40
-}
-
-#[derive(Debug, Clone, Deserialize, Serialize, Default)]
-pub struct CalendarHMFormat {
-    pub event: String,
-    pub timeline: String,
 }
 
 #[derive(Debug, Clone, Copy, Deserialize, Serialize, Default, PartialEq, Eq)]

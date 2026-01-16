@@ -128,3 +128,8 @@ impl EventDetails {
         );
     }
 }
+impl Default for EventDetails {
+    fn default() -> Self {
+        Self::new()
+    }
+}

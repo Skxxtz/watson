@@ -274,7 +274,7 @@ impl SliderBuilder {
         self
     }
     pub fn build(self) -> Slider {
-        let weak = self.ui.weak();
+        let weak = self.ui.downgrade();
         Slider {
             weak,
             func: self.func,

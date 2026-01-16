@@ -283,13 +283,14 @@ fn hue_to_rgb(p: f64, q: f64, t: f64) -> f64 {
 // Animation Stuff
 
 #[allow(dead_code)]
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, Default)]
 pub enum EaseFunction {
+    #[default]
+    None,
     EaseIn,
     EaseOut,
     EaseInOut,
     EaseOutCubic,
-    None,
 }
 impl EaseFunction {
     pub fn apply(&self, time: f64) -> f64 {
@@ -311,8 +312,10 @@ impl EaseFunction {
 }
 
 #[allow(dead_code)]
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, Default)]
 pub enum AnimationDirection {
+    #[default]
+    Uninitialized,
     Forward {
         duration: f64,
         function: EaseFunction,
@@ -321,7 +324,6 @@ pub enum AnimationDirection {
         duration: f64,
         function: EaseFunction,
     },
-    Uninitialized,
 }
 impl AnimationDirection {
     fn end(&self) -> f64 {
@@ -332,6 +334,7 @@ impl AnimationDirection {
     }
 }
 
+#[derive(Default)]
 pub struct AnimationState {
     pub progress: Cell<f64>,
     pub running: Cell<bool>,
@@ -422,7 +425,7 @@ impl<T: ObjectType> WidgetOption<T> {
             WidgetOption::Borrowed(weak) => weak.upgrade(),
         }
     }
-    pub fn weak(&self) -> WeakRef<T> {
+    pub fn downgrade(&self) -> WeakRef<T> {
         match self {
             Self::Owned(obj) => obj.downgrade(),
             Self::Borrowed(b) => b.clone(),

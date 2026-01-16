@@ -115,7 +115,7 @@ impl ButtonBuilder {
         self
     }
     pub fn build(self) -> Button {
-        let weak = self.ui.weak();
+        let weak = self.ui.downgrade();
         Button {
             weak,
             func: self.func,

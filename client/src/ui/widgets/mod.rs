@@ -1,6 +1,6 @@
 mod battery;
 mod button;
-mod calendar;
+pub mod calendar;
 mod clock;
 mod notifications;
 mod slider;
@@ -14,7 +14,6 @@ pub use calendar::Calendar;
 pub use clock::{Clock, HandStyle};
 pub use utils::BackendFunc;
 
-pub use calendar::CalendarConfig;
 use gtk4::{
     Align, AspectFrame, Box, DrawingArea, Separator,
     glib::{WeakRef, object::ObjectExt},

@@ -11,6 +11,7 @@ use zbus::{
 
 use crate::hardware::HardwareController;
 
+#[allow(dead_code)]
 impl HardwareController {
     // ----- Wifi -----
     pub async fn set_wifi(&self, enabled: bool) -> Result<(), WatsonError> {
