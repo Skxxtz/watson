@@ -1,4 +1,4 @@
-use std::sync::atomic::Ordering;
+use std::{borrow::Cow, sync::atomic::Ordering};
 
 use common::protocol::{AtomicSystemState, Request};
 
@@ -6,7 +6,7 @@ use crate::{DAEMON_TX, ui::widgets::BackendFunc};
 
 pub trait WidgetBehavior {
     fn clone_box(&self) -> Box<dyn WidgetBehavior>;
-    fn icon_name(&self, val: u8) -> &'static str;
+    fn icon_name(&self, val: u8) -> Cow<'static, str>;
     fn set_percentage(&self, state: &AtomicSystemState, value: u8);
     fn as_request(&self, state: &AtomicSystemState) -> Option<(u8, Request)>;
     fn get_percentage(&self, state: &AtomicSystemState) -> u8;
@@ -20,7 +20,7 @@ pub trait WidgetBehavior {
 
 #[derive(Clone)]
 pub struct ToggleButton {
-    pub icons: [&'static str; 2],
+    pub icons: [Cow<'static, str>; 2],
     // A closure that defines how to get/set the value
     pub getter: fn(&AtomicSystemState) -> bool,
     pub setter: fn(&AtomicSystemState, bool),
@@ -38,9 +38,9 @@ impl WidgetBehavior for ToggleButton {
     fn set_percentage(&self, state: &AtomicSystemState, value: u8) {
         (self.setter)(state, value != 0);
     }
-    fn icon_name(&self, val: u8) -> &'static str {
+    fn icon_name(&self, val: u8) -> Cow<'static, str> {
         let idx = val.clamp(0, 1);
-        self.icons[idx as usize]
+        self.icons[idx as usize].clone()
     }
     fn as_request(&self, state: &AtomicSystemState) -> Option<(u8, Request)> {
         let new_state = !(self.getter)(state);
@@ -54,7 +54,7 @@ impl WidgetBehavior for ToggleButton {
 
 #[derive(Clone)]
 pub struct CycleButton {
-    pub icons: &'static [&'static str], // List of icons for each state
+    pub icons: &'static [Cow<'static, str>], // List of icons for each state
     pub max_states: u8,
     pub field: fn(&AtomicSystemState) -> &std::sync::atomic::AtomicU8,
     pub request_builder: fn(u8) -> Request,
@@ -78,8 +78,11 @@ impl WidgetBehavior for CycleButton {
         Some((target, (self.request_builder)(target)))
     }
 
-    fn icon_name(&self, val: u8) -> &'static str {
-        self.icons.get(val as usize).unwrap_or(&"image-missing")
+    fn icon_name(&self, val: u8) -> Cow<'static, str> {
+        self.icons
+            .get(val as usize)
+            .cloned()
+            .unwrap_or(Cow::Borrowed("image-missing"))
     }
 
     fn set_percentage(&self, state: &AtomicSystemState, value: u8) {
@@ -97,7 +100,7 @@ impl WidgetBehavior for CycleButton {
 
 #[derive(Clone)]
 pub struct RangeBehavior {
-    pub icons: &'static [&'static str], // List of icons for each state
+    pub icons: &'static [Cow<'static, str>], // List of icons for each state
     pub field: fn(&AtomicSystemState) -> &std::sync::atomic::AtomicU8,
     pub request_builder: fn(u8) -> Request,
     pub func: BackendFunc,
@@ -112,10 +115,13 @@ impl WidgetBehavior for RangeBehavior {
         Some((target, (self.request_builder)(target)))
     }
 
-    fn icon_name(&self, val: u8) -> &'static str {
+    fn icon_name(&self, val: u8) -> Cow<'static, str> {
         let max_idx = self.icons.len().saturating_sub(1);
         let index = (val as usize * max_idx) / 100;
-        self.icons.get(index).unwrap_or(&"image-missing")
+        self.icons
+            .get(index as usize)
+            .cloned()
+            .unwrap_or(Cow::Borrowed("image-missing"))
     }
 
     fn set_percentage(&self, state: &AtomicSystemState, value: u8) {

@@ -166,7 +166,7 @@ impl Button {
                         // efficient icon replace logic
                         let new_icon = func.icon_name(new_state);
                         if let Some(icon_widget) = icon.upgrade() {
-                            icon_widget.set_icon_name(Some(new_icon));
+                            icon_widget.set_icon_name(Some(&new_icon));
                         }
                     }
                 }

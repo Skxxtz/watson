@@ -8,7 +8,7 @@ use gtk4::{
     },
 };
 use serde::{Deserialize, Serialize};
-use std::{cell::Cell, str::FromStr, sync::atomic::Ordering};
+use std::{borrow::Cow, cell::Cell, str::FromStr, sync::atomic::Ordering};
 use strum::Display;
 
 use crate::ui::widgets::interactives::{CycleButton, RangeBehavior, ToggleButton, WidgetBehavior};
@@ -451,8 +451,8 @@ impl BackendFunc {
         match self {
             Self::Wifi => Box::new(ToggleButton {
                 icons: [
-                    "network-wireless-disabled-symbolic",
-                    "network-wireless-signal-excellent-symbolic",
+                    Cow::Borrowed("network-wireless-disabled-symbolic"),
+                    Cow::Borrowed("network-wireless-signal-excellent-symbolic"),
                 ],
                 getter: |s| s.wifi.load(Ordering::Relaxed),
                 setter: |s, v| s.wifi.store(v, Ordering::Relaxed),
@@ -461,8 +461,8 @@ impl BackendFunc {
             }),
             Self::Bluetooth => Box::new(ToggleButton {
                 icons: [
-                    "bluetooth-disabled-symbolic",
-                    "bluetooth-symbolic",
+                    Cow::Borrowed("bluetooth-disabled-symbolic"),
+                    Cow::Borrowed("bluetooth-symbolic"),
                 ],
                 getter: |s| s.bluetooth.load(Ordering::Relaxed),
                 setter: |s, v| s.bluetooth.store(v, Ordering::Relaxed),
@@ -471,8 +471,8 @@ impl BackendFunc {
             }),
             Self::Dnd => Box::new(ToggleButton {
                 icons: [
-                    "weather-clear-night-symbolic",
-                    "weather-clear-night-symbolic",
+                    Cow::Borrowed("weather-clear-night-symbolic"),
+                    Cow::Borrowed("weather-clear-night-symbolic"),
                 ],
                 getter: |s| s.dnd.load(Ordering::Relaxed),
                 setter: |s, v| s.dnd.store(v, Ordering::Relaxed),
@@ -481,9 +481,9 @@ impl BackendFunc {
             }),
             Self::Powermode => Box::new(CycleButton {
                 icons: &[
-                    "watson-leaf-symbolic",
-                    "watson-scale-symbolic",
-                    "watson-bunny-symbolic",
+                    Cow::Borrowed("watson-leaf-symbolic"),
+                    Cow::Borrowed("watson-scale-symbolic"),
+                    Cow::Borrowed("watson-bunny-symbolic"),
                 ],
                 max_states: 3,
                 field: |s| &s.powermode,
@@ -492,10 +492,10 @@ impl BackendFunc {
             }),
             Self::Brightness => Box::new(RangeBehavior {
                 icons: &[
-                    "display-brightness-high-symbolic",
-                    "display-brightness-medium-symbolic",
-                    "display-brightness-low-symbolic",
-                    "display-brightness-off-symbolic",
+                    Cow::Borrowed("display-brightness-high-symbolic"),
+                    Cow::Borrowed("display-brightness-medium-symbolic"),
+                    Cow::Borrowed("display-brightness-low-symbolic"),
+                    Cow::Borrowed("display-brightness-off-symbolic"),
                 ],
                 field: |s| &s.brightness,
                 request_builder: |v| Request::SetBacklight(v),
@@ -503,10 +503,10 @@ impl BackendFunc {
             }),
             Self::Volume => Box::new(RangeBehavior {
                 icons: &[
-                    "audio-volume-high-symbolic",
-                    "audio-volume-medium-symbolic",
-                    "audio-volume-low-symbolic",
-                    "audio-volume-muted-symbolic",
+                    Cow::Borrowed("audio-volume-high-symbolic"),
+                    Cow::Borrowed("audio-volume-medium-symbolic"),
+                    Cow::Borrowed("audio-volume-low-symbolic"),
+                    Cow::Borrowed("audio-volume-muted-symbolic"),
                 ],
                 field: |s| &s.volume,
                 request_builder: |v| Request::SetVolume(v),
@@ -514,7 +514,7 @@ impl BackendFunc {
             }),
 
             Self::None => Box::new(ToggleButton {
-                icons: ["", ""],
+                icons: [Cow::Borrowed(""), Cow::Borrowed("")],
                 getter: |_| false,
                 setter: |_, _| {},
                 request_builder: |_| Request::Ping,
