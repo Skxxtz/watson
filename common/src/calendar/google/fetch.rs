@@ -15,7 +15,7 @@ use crate::{
             structs::{Attendee, DateTimeSpec, RecurrenceRule},
         },
     },
-    errors::{WatsonError, WatsonErrorKind},
+    utils::errors::{WatsonError, WatsonErrorKind},
     watson_err,
 };
 
@@ -237,11 +237,11 @@ impl CalendarProvider for GoogleCalendarClient {
         let text = resp
             .text()
             .await
-            .map_err(|e| watson_err!(WatsonErrorKind::Deserialization, e.to_string()))?;
+            .map_err(|e| watson_err!(WatsonErrorKind::Deserialize, e.to_string()))?;
 
         if !status.is_success() {
             let error: GoogleApiErrorResponse = serde_json::from_str(&text)
-                .map_err(|e| watson_err!(WatsonErrorKind::Deserialization, e.to_string()))?;
+                .map_err(|e| watson_err!(WatsonErrorKind::Deserialize, e.to_string()))?;
             return Err(watson_err!(
                 WatsonErrorKind::GoogleCalendar,
                 error.error.message
@@ -249,7 +249,7 @@ impl CalendarProvider for GoogleCalendarClient {
         }
 
         let list: GoogleCalendarList = serde_json::from_str(&text)
-            .map_err(|e| watson_err!(WatsonErrorKind::Deserialization, e.to_string()))?;
+            .map_err(|e| watson_err!(WatsonErrorKind::Deserialize, e.to_string()))?;
 
         Ok(list.items.into_iter().map(|i| i.into()).collect())
     }
@@ -287,7 +287,7 @@ impl CalendarProvider for GoogleCalendarClient {
             let text = resp
                 .text()
                 .await
-                .map_err(|e| watson_err!(WatsonErrorKind::Deserialization, e.to_string()))?;
+                .map_err(|e| watson_err!(WatsonErrorKind::Deserialize, e.to_string()))?;
 
             if !status.is_success() {
                 continue;
@@ -296,7 +296,7 @@ impl CalendarProvider for GoogleCalendarClient {
             let calendar_rc = Arc::new(calendar);
             let tmp_events: Vec<CalDavEvent> =
                 serde_json::from_str::<GoogleCalendarEventList>(&text)
-                    .map_err(|e| watson_err!(WatsonErrorKind::Deserialization, e.to_string()))?
+                    .map_err(|e| watson_err!(WatsonErrorKind::Deserialize, e.to_string()))?
                     .items
                     .into_iter()
                     .map(|v| v.to_cal_dav_event(calendar_rc.clone()))

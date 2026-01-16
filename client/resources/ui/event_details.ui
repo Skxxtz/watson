@@ -1,0 +1,153 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<interface>
+  <template class="EventDetails" parent="GtkBox">
+    <property name="orientation">vertical</property>
+    <style>
+      <class name="event-details-bg"/>
+    </style>
+
+    <child>
+      <object class="GtkBox">
+        <property name="orientation">vertical</property>
+        <property name="spacing">20</property>
+        <property name="margin-top">30</property>
+        <property name="margin-bottom">30</property>
+        <property name="margin-start">30</property>
+        <property name="margin-end">30</property>
+
+        <child>
+          <object class="GtkBox">
+            <property name="spacing">12</property>
+            <child>
+              <object class="GtkButton" id="back_button">
+                <property name="icon-name">go-previous-symbolic</property>
+                <style><class name="flat"/><class name="circular"/></style>
+              </object>
+            </child>
+            <child>
+              <object class="GtkLabel" id="category_label">
+                <property name="valign">center</property>
+                <style><class name="event-tag"/></style>
+              </object>
+            </child>
+          </object>
+        </child>
+
+        <child>
+          <object class="GtkLabel" id="event_title">
+            <property name="halign">start</property>
+            <property name="wrap">true</property>
+            <property name="lines">2</property>
+            <property name="ellipsize">end</property>
+            <style><class name="title-1"/></style>
+          </object>
+        </child>
+
+        <child>
+          <object class="GtkGrid">
+            <property name="row-spacing">12</property>
+            <property name="column-spacing">12</property>
+
+            <child>
+              <object class="GtkImage">
+                <property name="icon-name">appointment-soon-symbolic</property>
+                <style><class name="dim-label"/></style>
+                <layout><property name="column">0</property><property name="row">0</property></layout>
+              </object>
+            </child>
+            <child>
+              <object class="GtkLabel">
+                <property name="label">Starts</property>
+                <property name="halign">start</property>
+                <style><class name="secondary-label"/></style>
+                <layout><property name="column">1</property><property name="row">0</property></layout>
+              </object>
+            </child>
+            <child>
+              <object class="GtkLabel" id="event_start">
+                <property name="halign">end</property>
+                <property name="hexpand">true</property>
+                <style><class name="numeric-data"/></style>
+                <layout><property name="column">2</property><property name="row">0</property></layout>
+              </object>
+            </child>
+
+            <child>
+              <object class="GtkImage">
+                <property name="icon-name">alarm-symbolic</property>
+                <style><class name="dim-label"/></style>
+                <layout><property name="column">0</property><property name="row">1</property></layout>
+              </object>
+            </child>
+            <child>
+              <object class="GtkLabel">
+                <property name="label">Ends</property>
+                <property name="halign">start</property>
+                <style><class name="secondary-label"/></style>
+                <layout><property name="column">1</property><property name="row">1</property></layout>
+              </object>
+            </child>
+            <child>
+              <object class="GtkLabel" id="event_end">
+                <property name="halign">end</property>
+                <style><class name="numeric-data"/></style>
+                <layout><property name="column">2</property><property name="row">1</property></layout>
+              </object>
+            </child>
+
+            <child>
+              <object class="GtkImage" id="recurrence_icon">
+                <property name="icon-name">emblem-synchronizing-symbolic</property>
+                <style><class name="dim-label"/></style>
+                <layout><property name="column">0</property><property name="row">2</property></layout>
+              </object>
+            </child>
+            <child>
+              <object class="GtkLabel" id="recurrence_label">
+                <property name="halign">start</property>
+                <style><class name="secondary-label"/></style>
+                <layout><property name="column">1</property><property name="row">2</property><property name="column-span">2</property></layout>
+              </object>
+            </child>
+
+            <child>
+              <object class="GtkImage" id="location_icon">
+                <property name="icon-name">mark-location-symbolic</property>
+                <style><class name="dim-label"/></style>
+                <layout><property name="column">0</property><property name="row">3</property></layout>
+              </object>
+            </child>
+            <child>
+              <object class="GtkLabel" id="event_location">
+                <property name="halign">start</property>
+                <property name="wrap">true</property>
+                <style><class name="location-text"/></style>
+                <layout><property name="column">1</property><property name="row">3</property><property name="column-span">2</property></layout>
+              </object>
+            </child>
+          </object>
+        </child>
+
+        <child>
+          <object class="GtkSeparator"/>
+        </child>
+
+        <child>
+          <object class="GtkScrolledWindow">
+            <property name="vexpand">true</property>
+            <property name="hscrollbar-policy">never</property>
+            <child>
+              <object class="GtkLabel" id="event_description">
+                <property name="halign">start</property>
+                <property name="valign">start</property>
+                <property name="wrap">true</property>
+                <property name="xalign">0</property>
+                <style><class name="description-body"/></style>
+              </object>
+            </child>
+          </object>
+        </child>
+      </object>
+    </child>
+  </template>
+</interface>

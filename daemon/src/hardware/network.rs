@@ -1,7 +1,7 @@
 use std::collections::HashMap;
 
 use common::{
-    errors::{WatsonError, WatsonErrorKind},
+    utils::errors::{WatsonError, WatsonErrorKind},
     watson_err,
 };
 use zbus::{

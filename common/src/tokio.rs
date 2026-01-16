@@ -4,7 +4,7 @@ use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::UnixStream;
 use tokio::net::unix::{OwnedReadHalf, OwnedWriteHalf};
 
-use crate::errors::{WatsonError, WatsonErrorKind};
+use crate::utils::errors::{WatsonError, WatsonErrorKind};
 use crate::watson_err;
 
 pub struct SizedMessageObj {
@@ -16,7 +16,7 @@ impl SizedMessageObj {
     /// This guarantees Bincode is used every time.
     pub fn from_struct<T: Serialize>(data: &T) -> Result<Self, WatsonError> {
         let buffer = bincode::serialize(data)
-            .map_err(|e| watson_err!(WatsonErrorKind::Serialization, e.to_string()))?;
+            .map_err(|e| watson_err!(WatsonErrorKind::Serialize, e.to_string()))?;
         Ok(Self { buffer })
     }
 

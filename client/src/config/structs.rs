@@ -1,11 +1,11 @@
 use std::fs::File;
 use std::{io::BufReader, path::PathBuf};
 
-use common::errors::{WatsonError, WatsonErrorKind};
+use common::utils::errors::{WatsonError, WatsonErrorKind};
 use common::watson_err;
 use serde::{Deserialize, Serialize};
 
-use crate::ui::widgets::{ButtonFunc, HandStyle, SliderFunc, SliderRange};
+use crate::ui::widgets::{BackendFunc, CalendarConfig, HandStyle, SliderRange};
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct WidgetBase {
@@ -99,7 +99,7 @@ pub enum WidgetSpec {
         base: WidgetBase,
 
         #[serde(default)]
-        func: ButtonFunc,
+        func: BackendFunc,
 
         #[serde(default)]
         icon: Option<String>,
@@ -117,7 +117,7 @@ pub enum WidgetSpec {
         base: WidgetBase,
 
         #[serde(default)]
-        func: SliderFunc,
+        func: BackendFunc,
 
         #[serde(default)]
         icon: Option<String>,
@@ -188,15 +188,13 @@ impl WidgetSpec {
                 Self::Battery { .. } => 1 << 0,
                 Self::Slider { func, ..} => {
                     match func {
-                        SliderFunc::Brightness => {
+                        BackendFunc::Brightness => {
                             0
                         },
-                        SliderFunc::Volume => {
+                        BackendFunc::Volume => {
                             1 << 1
                         }
-                        SliderFunc::None => {
-                            0
-                        }
+                        _ => 0
                     }
                 }
                 Self::Row { children, .. } => {
@@ -219,7 +217,32 @@ impl WidgetSpec {
     }
 }
 impl WidgetSpec {
-    pub fn as_button(&self) -> Option<(&WidgetBase, &ButtonFunc, Option<String>)> {
+    pub fn as_calendar<'w>(&'w self, default_format: &'w CalendarHMFormat) -> CalendarConfig<'w> {
+        match self {
+            WidgetSpec::Calendar {
+                accent_color,
+                font,
+                hours_past,
+                hours_future,
+                hm_format,
+                ..
+            } => CalendarConfig {
+                accent_color,
+                font,
+                hm_format,
+                hours_past: *hours_past,
+                hours_future: *hours_future,
+            },
+            _ => CalendarConfig {
+                accent_color: "#e9a949",
+                font: "Sans",
+                hm_format: default_format,
+                hours_past: 2,
+                hours_future: 6,
+            },
+        }
+    }
+    pub fn as_button(&self) -> Option<(&WidgetBase, &BackendFunc, Option<String>)> {
         if let Self::Button { base, func, icon } = self {
             Some((base, func, icon.clone()))
         } else {
@@ -230,7 +253,7 @@ impl WidgetSpec {
         &self,
     ) -> Option<(
         &WidgetBase,
-        &SliderFunc,
+        &BackendFunc,
         Option<String>,
         &SliderRange,
         &WidgetOrientation,
@@ -279,7 +302,7 @@ pub fn load_config() -> Result<Vec<WidgetSpec>, WatsonError> {
     let reader = BufReader::new(file);
 
     serde_json::from_reader::<_, Vec<WidgetSpec>>(reader)
-        .map_err(|e| watson_err!(WatsonErrorKind::Deserialization, e.to_string()))
+        .map_err(|e| watson_err!(WatsonErrorKind::Deserialize, e.to_string()))
 }
 
 fn default_font() -> String {

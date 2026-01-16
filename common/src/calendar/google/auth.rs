@@ -10,7 +10,7 @@ use tokio::{
 
 use crate::{
     auth::CredentialData,
-    errors::{WatsonError, WatsonErrorKind},
+    utils::errors::{WatsonError, WatsonErrorKind},
     watson_err,
 };
 
@@ -103,7 +103,7 @@ pub async fn exchange_code_for_tokens(code: &str) -> Result<GoogleTokenResponse,
         .map_err(|e| watson_err!(WatsonErrorKind::HttpPostRequest, e.to_string()))?;
 
     serde_json::from_str(&text)
-        .map_err(|e| watson_err!(WatsonErrorKind::Deserialization, e.to_string()))
+        .map_err(|e| watson_err!(WatsonErrorKind::Deserialize, e.to_string()))
 }
 
 pub async fn wait_for_auth_code() -> Result<String, WatsonError> {
@@ -194,7 +194,7 @@ impl GoogleAuth {
             .map_err(|e| watson_err!(WatsonErrorKind::HttpPostRequest, e.to_string()))?;
 
         let response: GoogleRefreshTokenResponse = serde_json::from_str(&text)
-            .map_err(|e| watson_err!(WatsonErrorKind::Deserialization, e.to_string()))?;
+            .map_err(|e| watson_err!(WatsonErrorKind::Deserialize, e.to_string()))?;
 
         Ok(response.access_token)
     }

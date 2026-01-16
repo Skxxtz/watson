@@ -1,38 +1,36 @@
 use crate::{
-    DAEMON_TX,
     config::{WidgetOrientation, WidgetSpec},
-    ui::{
-        g_templates::main_window::MainWindow,
-        widgets::utils::{
-            AnimationDirection, AnimationState, CairoShapesExt, EaseFunction, Rgba, WidgetOption,
-        },
+    ui::widgets::utils::{
+        AnimationDirection, AnimationState, BackendFunc, CairoShapesExt, EaseFunction, Rgba,
+        WidgetOption,
     },
 };
-use common::protocol::{Request, SystemState};
+use common::protocol::AtomicSystemState;
 use gtk4::{
     Box, DrawingArea, GestureDrag, Image, Overlay,
     cairo::Context,
     glib::{
         WeakRef,
         object::{CastNone, ObjectExt},
-        subclass::types::ObjectSubclassIsExt,
     },
     prelude::{
-        BoxExt, DrawingAreaExtManual, EventControllerExt, GestureDragExt, GtkApplicationExt,
-        WidgetExt, WidgetExtManual,
+        BoxExt, DrawingAreaExtManual, EventControllerExt, GestureDragExt, WidgetExt,
+        WidgetExtManual,
     },
 };
 use serde::{Deserialize, Serialize};
 use std::{
     cell::{Cell, RefCell},
     rc::Rc,
+    sync::Arc,
     time::Instant,
 };
 
 #[derive(Clone, Debug)]
 pub struct Slider {
     pub weak: WeakRef<DrawingArea>,
-    pub func: SliderFunc,
+    pub func: BackendFunc,
+    pub edit_lock: Rc<Cell<bool>>,
 }
 impl Slider {
     pub fn queue_draw(&self) {
@@ -45,10 +43,11 @@ impl Slider {
 pub struct SliderBuilder {
     ui: WidgetOption<DrawingArea>,
     overlay: WidgetOption<Overlay>,
-    func: SliderFunc,
+    func: BackendFunc,
+    edit_lock: Rc<Cell<bool>>,
 }
 impl SliderBuilder {
-    pub fn new(specs: &WidgetSpec, system_state: Rc<SystemState>, in_holder: bool) -> Self {
+    pub fn new(specs: &WidgetSpec, system_state: Arc<AtomicSystemState>, in_holder: bool) -> Self {
         let (_, _, _, _range, orientation) = specs.as_slider().unwrap();
 
         match orientation {
@@ -56,7 +55,11 @@ impl SliderBuilder {
             WidgetOrientation::Horizontal => Self::horizontal(specs, system_state, in_holder),
         }
     }
-    pub fn vertical(specs: &WidgetSpec, system_state: Rc<SystemState>, in_holder: bool) -> Self {
+    pub fn vertical(
+        specs: &WidgetSpec,
+        system_state: Arc<AtomicSystemState>,
+        in_holder: bool,
+    ) -> Self {
         let (base, func, icon, _range, _) = specs.as_slider().unwrap();
 
         let icon = icon.unwrap_or(func.icon_name(0.5));
@@ -110,25 +113,27 @@ impl SliderBuilder {
             }
         });
 
+        let edit_lock = Rc::new(Cell::new(false));
         Slider::connect_drag(
             &area,
-            Rc::clone(&system_state),
+            Arc::clone(&system_state),
             *func,
             WidgetOrientation::Vertical,
             svg_icon.downgrade(),
             Rc::clone(&animation_state),
+            Rc::clone(&edit_lock),
         );
 
         area.set_draw_func({
             let func = func.clone();
-            let system_state = Rc::clone(&system_state);
+            let system_state = Arc::clone(&system_state);
             move |area, ctx, width, height| {
                 Slider::draw_vert(
                     area,
                     ctx,
                     width,
                     height,
-                    Rc::clone(&system_state),
+                    Arc::clone(&system_state),
                     func,
                     Rc::clone(&animation_state),
                 );
@@ -149,9 +154,14 @@ impl SliderBuilder {
             ui: WidgetOption::Owned(area),
             overlay: WidgetOption::Owned(overlay),
             func: *func,
+            edit_lock,
         }
     }
-    pub fn horizontal(specs: &WidgetSpec, system_state: Rc<SystemState>, in_holder: bool) -> Self {
+    pub fn horizontal(
+        specs: &WidgetSpec,
+        system_state: Arc<AtomicSystemState>,
+        in_holder: bool,
+    ) -> Self {
         let (base, func, _, _range, _) = specs.as_slider().unwrap();
 
         let builder = Overlay::builder()
@@ -175,7 +185,11 @@ impl SliderBuilder {
             .can_target(false)
             .build();
 
-        let area = DrawingArea::builder().hexpand(true).vexpand(true).build();
+        let area = DrawingArea::builder()
+            .css_classes(["slider-obj"])
+            .hexpand(true)
+            .vexpand(true)
+            .build();
 
         let content = Box::builder()
             .orientation(gtk4::Orientation::Horizontal)
@@ -209,25 +223,27 @@ impl SliderBuilder {
             }
         });
 
+        let edit_lock = Rc::new(Cell::new(false));
         Slider::connect_drag(
             &area,
-            Rc::clone(&system_state),
+            Arc::clone(&system_state),
             *func,
             WidgetOrientation::Horizontal,
             WeakRef::default(),
             Rc::clone(&animation_state),
+            Rc::clone(&edit_lock),
         );
 
         area.set_draw_func({
             let func = func.clone();
-            let system_state = Rc::clone(&system_state);
+            let system_state = Arc::clone(&system_state);
             move |area, ctx, width, height| {
                 Slider::draw_horz(
                     area,
                     ctx,
                     width,
                     height,
-                    Rc::clone(&system_state),
+                    Arc::clone(&system_state),
                     func,
                     Rc::clone(&animation_state),
                 );
@@ -248,6 +264,7 @@ impl SliderBuilder {
             ui: WidgetOption::Owned(area),
             overlay: WidgetOption::Owned(overlay),
             func: *func,
+            edit_lock,
         }
     }
     pub fn for_box(mut self, container: &Box) -> Self {
@@ -261,6 +278,7 @@ impl SliderBuilder {
         Slider {
             weak,
             func: self.func,
+            edit_lock: self.edit_lock,
         }
     }
 }
@@ -271,8 +289,8 @@ impl Slider {
         ctx: &Context,
         width: i32,
         height: i32,
-        state: Rc<SystemState>,
-        func: SliderFunc,
+        state: Arc<AtomicSystemState>,
+        func: BackendFunc,
         _animation_state: Rc<AnimationState>,
     ) {
         let color: Rgba = _area.color().into();
@@ -293,8 +311,8 @@ impl Slider {
         ctx: &Context,
         width: i32,
         height: i32,
-        state: Rc<SystemState>,
-        func: SliderFunc,
+        state: Arc<AtomicSystemState>,
+        func: BackendFunc,
         animation_state: Rc<AnimationState>,
     ) {
         let color: Rgba = _area.color().into();
@@ -306,38 +324,66 @@ impl Slider {
         let h = height as f64;
         let w = width as f64;
         let fill_width = w * percentage;
-        let y_start = (h - thickness) / 2.0;
 
-        // Background
+        let bg_height = 5.0;
+        let bg_y = (h - bg_height) / 2.0;
+
+        let progress_y = (h - thickness) / 2.0;
+
+        ctx.set_source_rgba(color.r, color.g, color.b, 0.3);
+        CairoShapesExt::rounded_rectangle(
+            ctx,
+            0.0,
+            bg_y,
+            w,
+            bg_height,
+            (
+                bg_height / 2.0,
+                bg_height / 2.0,
+                bg_height / 2.0,
+                bg_height / 2.0,
+            ),
+        );
+        ctx.fill().unwrap();
+
         ctx.set_source_rgba(color.r, color.g, color.b, 1.0);
         CairoShapesExt::rounded_rectangle(
             ctx,
             0.0,
-            y_start,
+            progress_y,
             fill_width,
             thickness,
-            (thickness, thickness, thickness, thickness),
+            (
+                thickness / 2.0,
+                thickness / 2.0,
+                thickness / 2.0,
+                thickness / 2.0,
+            ),
         );
         ctx.fill().unwrap();
     }
 
     fn connect_drag(
         target: &DrawingArea,
-        system_state: Rc<SystemState>,
-        func: SliderFunc,
+        system_state: Arc<AtomicSystemState>,
+        func: BackendFunc,
         orientation: WidgetOrientation,
         icon: WeakRef<Image>,
         animation_state: Rc<AnimationState>,
+        edit_lock: Rc<Cell<bool>>,
     ) {
         let drag = GestureDrag::new();
         let perc = func.percentage(&system_state) as f32 / 100.0;
 
         drag.connect_drag_begin({
-            let system_state = Rc::clone(&system_state);
+            let system_state = Arc::clone(&system_state);
             let icon = icon.clone();
             let animation_state = Rc::clone(&animation_state);
+            let edit_lock = Rc::clone(&edit_lock);
             move |gesture, x, y| {
+                edit_lock.set(true);
                 let target = gesture.widget().and_downcast::<DrawingArea>().unwrap();
+                target.add_css_class("moving");
                 animation_state.start(AnimationDirection::Forward {
                     duration: 0.05,
                     function: EaseFunction::EaseIn,
@@ -361,14 +407,14 @@ impl Slider {
                 }
 
                 let new_percent = (new_p * 100.0) as u8;
-                func.execute(new_percent);
                 func.set_percentage(&system_state, new_percent);
+                func.execute(Arc::clone(&system_state));
                 target.queue_draw();
             }
         });
 
         drag.connect_drag_update({
-            let system_state = Rc::clone(&system_state);
+            let system_state = Arc::clone(&system_state);
             let last_seen_percent = Rc::new(Cell::new(0u8));
             let last_sent_time = Rc::new(Cell::new(Instant::now()));
             let last_seen_icon = Rc::new(RefCell::new(func.icon_name(perc)));
@@ -410,93 +456,32 @@ impl Slider {
                         if elapsed > 100 {
                             last_seen_percent.set(new_percent);
                             last_sent_time.set(now);
-                            func.execute(new_percent);
+                            func.execute(Arc::clone(&system_state));
                         }
                     }
                 }
             }
         });
         drag.connect_drag_end({
-            let system_state = Rc::clone(&system_state);
+            let system_state = Arc::clone(&system_state);
             let animation_state = Rc::clone(&animation_state);
-            move |_, _, _| {
+            let edit_lock = Rc::clone(&edit_lock);
+            move |gesture, _, _| {
+                edit_lock.set(false);
+                let target = gesture.widget().and_downcast::<DrawingArea>().unwrap();
+                target.remove_css_class("moving");
+
                 animation_state.start(AnimationDirection::Backward {
                     duration: 0.1,
                     function: EaseFunction::EaseOut,
                 });
                 let final_percent = func.percentage(&system_state);
-                func.execute(final_percent);
+                func.set_percentage(&system_state, final_percent);
+                func.execute(Arc::clone(&system_state));
             }
         });
 
         target.add_controller(drag);
-    }
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, Serialize, Default)]
-#[serde(rename_all = "lowercase")]
-pub enum SliderFunc {
-    #[default]
-    None,
-    Volume,
-    Brightness,
-}
-impl SliderFunc {
-    pub fn update_widgets(&self) {
-        let app = gtk4::Application::default();
-        if let Some(window) = app.active_window().and_downcast::<MainWindow>() {
-            let state = window.imp().state.borrow();
-            for slider in state.slider(*self) {
-                slider.queue_draw();
-            }
-        }
-    }
-    pub fn icon_name(&self, percentage: f32) -> String {
-        match self {
-            Self::Volume => match percentage {
-                p if p > 0.67 => "audio-volume-high-symbolic",
-                p if p > 0.34 => "audio-volume-medium-symbolic",
-                p if p > 0.01 => "audio-volume-low-symbolic",
-                _ => "audio-volume-muted-symbolic",
-            },
-            Self::Brightness => match percentage {
-                p if p > 0.67 => "display-brightness-high-symbolic",
-                p if p > 0.34 => "display-brightness-medium-symbolic",
-                p if p > 0.01 => "display-brightness-low-symbolic",
-                _ => "display-brightness-off-symbolic",
-            },
-            Self::None => "none",
-        }
-        .into()
-    }
-    pub fn execute(&self, percentage: u8) {
-        match self {
-            Self::Brightness => {
-                DAEMON_TX
-                    .get()
-                    .map(|d| d.send(Request::SetBacklight(percentage)));
-            }
-            Self::Volume => {
-                DAEMON_TX
-                    .get()
-                    .map(|d| d.send(Request::SetVolume(percentage)));
-            }
-            Self::None => {}
-        }
-    }
-    pub fn percentage(&self, system_state: &Rc<SystemState>) -> u8 {
-        match self {
-            Self::Brightness => system_state.brightness.get(),
-            Self::Volume => system_state.volume.get(),
-            Self::None => 0,
-        }
-    }
-    pub fn set_percentage(&self, system_state: &Rc<SystemState>, percentage: u8) {
-        match self {
-            Self::Brightness => system_state.brightness.set(percentage),
-            Self::Volume => system_state.volume.set(percentage),
-            Self::None => {}
-        }
     }
 }
 

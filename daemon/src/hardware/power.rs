@@ -1,6 +1,6 @@
 use common::{
-    errors::{WatsonError, WatsonErrorKind},
     protocol::PowerMode,
+    utils::errors::{WatsonError, WatsonErrorKind},
     watson_err,
 };
 use zbus::Proxy;

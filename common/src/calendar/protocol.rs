@@ -1,6 +1,6 @@
 use crate::{
     calendar::utils::{CalDavEvent, CalendarInfo},
-    errors::WatsonError,
+    utils::errors::WatsonError,
 };
 use async_trait::async_trait;
 

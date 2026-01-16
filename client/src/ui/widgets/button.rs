@@ -1,29 +1,20 @@
 use crate::{
-    DAEMON_TX, SystemState,
     config::WidgetSpec,
-    ui::{
-        g_templates::main_window::MainWindow,
-        widgets::utils::{CairoShapesExt, Rgba, WidgetOption},
-    },
+    ui::widgets::utils::{BackendFunc, Rgba, WidgetOption},
 };
-use common::protocol::PowerMode;
+use common::protocol::AtomicSystemState;
 use gtk4::{
     Box, DrawingArea, GestureClick, Image, Overlay,
     cairo::Context,
-    glib::{
-        WeakRef,
-        object::{CastNone, ObjectExt},
-        subclass::types::ObjectSubclassIsExt,
-    },
-    prelude::{BoxExt, DrawingAreaExtManual, GtkApplicationExt, WidgetExt},
+    glib::{WeakRef, object::ObjectExt},
+    prelude::{BoxExt, DrawingAreaExtManual, WidgetExt},
 };
-use serde::{Deserialize, Serialize};
-use std::rc::Rc;
+use std::{rc::Rc, sync::Arc};
 
 #[derive(Clone, Debug)]
 pub struct Button {
     pub weak: WeakRef<DrawingArea>,
-    pub func: ButtonFunc,
+    pub func: BackendFunc,
 }
 impl Button {
     pub fn queue_draw(&self) {
@@ -36,20 +27,18 @@ impl Button {
 pub struct ButtonBuilder {
     ui: WidgetOption<DrawingArea>,
     overlay: WidgetOption<Overlay>,
-    func: ButtonFunc,
+    func: BackendFunc,
 }
 impl ButtonBuilder {
-    pub fn new(specs: &WidgetSpec, system_state: Rc<SystemState>, in_holder: bool) -> Self {
+    pub fn new(specs: &WidgetSpec, system_state: Arc<AtomicSystemState>, in_holder: bool) -> Self {
         let specs = Rc::new(specs.clone());
         let (base, func, icon) = specs.as_button().unwrap();
-        let icon = icon.unwrap_or(func.icon_name());
 
-        let initial_class = if func.is_active(&system_state) {
-            "active"
-        } else {
-            "inactive"
-        };
-        let builder = Overlay::builder().css_classes(["widget", "button", initial_class]);
+        let perc = func.percentage(&system_state);
+        let icon = icon.unwrap_or(func.icon_name(perc as f32 / 100.0));
+
+        let initial_class = if perc == 1 { "active" } else { "inactive" };
+        let builder = Overlay::builder().css_classes(["button", initial_class]);
 
         let overlay = if in_holder {
             builder
@@ -68,10 +57,24 @@ impl ButtonBuilder {
         }
         .build();
 
-        let area = DrawingArea::new();
+        let button_holder = Box::builder()
+            .hexpand(true)
+            .vexpand(true)
+            .can_target(false)
+            .overflow(gtk4::Overflow::Visible)
+            .valign(gtk4::Align::Center)
+            .halign(gtk4::Align::Center)
+            .build();
+
+        let area = DrawingArea::builder()
+            .css_classes(["button-obj"])
+            .overflow(gtk4::Overflow::Hidden)
+            .build();
+        button_holder.append(&area);
+
         let svg_icon = Image::builder().icon_name(icon).can_target(false).build();
 
-        overlay.set_child(Some(&area));
+        overlay.set_child(Some(&button_holder));
         overlay.add_overlay(&svg_icon);
 
         if let Some(id) = specs.id() {
@@ -124,26 +127,22 @@ impl Button {
     fn draw(_area: &DrawingArea, ctx: &Context, width: i32, height: i32) {
         let color: Rgba = _area.color().into();
 
-        let side = (width as f64).min(height as f64);
-        let padding = side * 0.1;
-        let radius = (side / 2.0) - padding;
-        let (cx, cy) = (width as f64 / 2.0, height as f64 / 2.0);
-
         ctx.set_source_rgba(color.r, color.g, color.b, color.a);
-        CairoShapesExt::circle(ctx, cx, cy, radius);
+        ctx.rectangle(0.0, 0.0, width as f64, height as f64);
+        ctx.fill().unwrap();
     }
 
-    fn connect_clicked(target: &Overlay, func: ButtonFunc, system_state: Rc<SystemState>) {
+    fn connect_clicked(target: &Overlay, func: BackendFunc, system_state: Arc<AtomicSystemState>) {
         let click = GestureClick::new();
-        let times = std::cell::Cell::new(func.is_active(&system_state));
+        let times = std::cell::Cell::new(func.percentage(&system_state));
         click.connect_pressed({
             let target = target.downgrade();
-            let state = Rc::clone(&system_state);
+            let state = Arc::clone(&system_state);
             move |_gesture, _, _, _| {
-                func.execute(Rc::clone(&state));
-                times.set(!times.get());
+                func.execute(Arc::clone(&state));
+                times.set(times.get() ^ 1);
                 if let Some(target) = target.upgrade() {
-                    if times.get() {
+                    if times.get() == 1 {
                         target.remove_css_class("inactive");
                         target.add_css_class("active");
                     } else {
@@ -155,70 +154,5 @@ impl Button {
             }
         });
         target.add_controller(click);
-    }
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, Serialize, Default)]
-#[serde(rename_all = "lowercase")]
-pub enum ButtonFunc {
-    #[default]
-    None,
-    Wifi,
-    Bluetooth,
-    Dnd,
-    PowerSave,
-}
-impl ButtonFunc {
-    pub fn update_widgets(&self) {
-        let app = gtk4::Application::default();
-        if let Some(window) = app.active_window().and_downcast::<MainWindow>() {
-            let state = window.imp().state.borrow();
-            let buttons = state.button(*self);
-            buttons.for_each(|b| b.queue_draw());
-        }
-    }
-    pub fn icon_name(&self) -> String {
-        match self {
-            Self::Wifi => "network-wireless-signal-excellent-symbolic",
-            Self::Bluetooth => "bluetooth-symbolic",
-            Self::PowerSave => "power-profile-power-saver-symbolic",
-            Self::Dnd => "weather-clear-night-symbolic",
-            Self::None => "none",
-        }
-        .into()
-    }
-    pub fn execute(&self, state: Rc<SystemState>) {
-        match self {
-            ButtonFunc::Wifi => {
-                let target = !state.wifi.get();
-                DAEMON_TX
-                    .get()
-                    .map(|d| d.send(common::protocol::Request::SetWifi(target)));
-                state.wifi.set(target);
-            }
-            ButtonFunc::Bluetooth => {
-                let target = !state.bluetooth.get();
-                DAEMON_TX
-                    .get()
-                    .map(|d| d.send(common::protocol::Request::SetBluetooth(target)));
-                state.wifi.set(target);
-            }
-            ButtonFunc::PowerSave => {
-                let target = !state.powermode.get();
-                DAEMON_TX
-                    .get()
-                    .map(|d| d.send(common::protocol::Request::SetPowerMode(target)));
-                state.powermode.set(target);
-            }
-            _ => {}
-        }
-    }
-    pub fn is_active(&self, state: &Rc<SystemState>) -> bool {
-        match self {
-            ButtonFunc::Wifi => state.wifi.get(),
-            ButtonFunc::Bluetooth => state.bluetooth.get(),
-            ButtonFunc::PowerSave => state.powermode.get() == PowerMode::PowerSave,
-            _ => false,
-        }
     }
 }

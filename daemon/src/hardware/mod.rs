@@ -1,11 +1,7 @@
-use std::{cell::Cell, sync::Arc};
+use std::sync::Arc;
 
-use common::{
-    errors::{WatsonError, WatsonErrorKind},
-    protocol::SystemState,
-    watson_err,
-};
-use tokio::sync::Semaphore;
+use common::{protocol::SystemStateRaw, utils::errors::WatsonError};
+use tokio::sync::{Semaphore, mpsc};
 use zbus::Connection;
 
 use crate::hardware::{audio::VolumeState, backlight::BrightnessState};
@@ -15,20 +11,19 @@ mod backlight;
 mod network;
 mod power;
 
+pub use audio::{AudioCommand, audio_actor};
+
 pub struct SystemStateBuilder;
 impl SystemStateBuilder {
-    pub(crate) async fn new() -> Result<SystemState, WatsonError> {
-        let conn = Connection::system()
-            .await
-            .map_err(|e| watson_err!(WatsonErrorKind::DBusConnect, e.to_string()))?;
-
-        let mut tmp_hardware = HardwareController::new(conn);
-        Ok(SystemState {
-            wifi: Cell::new(tmp_hardware.get_wifi().await?),
-            bluetooth: Cell::new(tmp_hardware.get_bluetooth().await?),
-            powermode: Cell::new(tmp_hardware.get_powermode().await?),
-            brightness: Cell::new(tmp_hardware.get_brightness().await?),
-            volume: Cell::new(tmp_hardware.get_volume().await?),
+    pub(crate) async fn new(
+        hardware: &mut HardwareController,
+    ) -> Result<SystemStateRaw, WatsonError> {
+        Ok(SystemStateRaw {
+            wifi: hardware.get_wifi().await?,
+            bluetooth: hardware.get_bluetooth().await?,
+            powermode: hardware.get_powermode().await?.into(),
+            brightness: hardware.get_brightness().await?,
+            volume: hardware.get_volume().await?,
         })
     }
 }
@@ -47,5 +42,8 @@ impl HardwareController {
             volume_state: None,
             throttle: Arc::new(Semaphore::new(1)),
         }
+    }
+    pub fn set_audio_state(&mut self, tx: mpsc::Sender<AudioCommand>) {
+        self.volume_state.replace(VolumeState::new(tx));
     }
 }

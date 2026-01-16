@@ -1,4 +1,4 @@
-use crate::{auth::AuthTui, errors::WatsonError};
+use crate::{auth::AuthTui, utils::errors::WatsonError};
 
 pub struct ArgParse;
 impl ArgParse {

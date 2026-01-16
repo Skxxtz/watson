@@ -1,14 +1,15 @@
 use std::collections::HashMap;
 use std::sync::Arc;
 
-use common::errors::{WatsonError, WatsonErrorKind};
 use common::notification::Notification;
 use common::protocol::InternalMessage;
+use common::utils::errors::{WatsonError, WatsonErrorKind};
 use common::watson_err;
-use tokio::sync::{Notify, RwLock, broadcast};
+use tokio::sync::{Notify, RwLock};
 use zbus::zvariant::OwnedValue;
 use zbus::{Connection, interface};
 
+use crate::DAEMON_TX;
 use crate::hardware::HardwareController;
 use crate::service_reg::ServiceRegister;
 
@@ -28,25 +29,23 @@ pub struct DaemonSettings {
 pub struct NotificationDaemon {
     id: u32,
     buffer: HashMap<u32, Notification>,
-    sender: broadcast::Sender<InternalMessage>,
     pub wake_signal: Arc<Notify>,
     pub hardware: HardwareController,
     pub settings: DaemonSettings,
-    pub register: ServiceRegister,
+    pub register: Arc<ServiceRegister>,
 }
 impl NotificationDaemon {
-    pub async fn new(sender: broadcast::Sender<InternalMessage>) -> Result<Self, WatsonError> {
+    pub async fn new() -> Result<Self, WatsonError> {
         let conn = Connection::system()
             .await
             .map_err(|e| watson_err!(WatsonErrorKind::DBusConnect, e.to_string()))?;
         Ok(Self {
             id: 0,
             buffer: HashMap::new(),
-            sender,
             wake_signal: Arc::new(Notify::new()),
             hardware: HardwareController::new(conn),
             settings: DaemonSettings { silent: false },
-            register: ServiceRegister::new(),
+            register: Arc::new(ServiceRegister::new()),
         })
     }
 
@@ -97,7 +96,9 @@ impl DaemonHandle {
         daemon.buffer.insert(id, notification);
 
         // Notify that a new notification has been added
-        let _result = daemon.sender.send(InternalMessage::Notification(id));
+        let _result = DAEMON_TX
+            .get()
+            .map(|d| d.send(InternalMessage::Notification(id)));
 
         id
     }

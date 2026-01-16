@@ -2,14 +2,14 @@ use chrono::{
     DateTime, Local, NaiveDate, NaiveDateTime, NaiveTime, TimeZone, Utc, offset::LocalResult,
 };
 use chrono_tz::Tz;
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 
 use crate::{
-    errors::{WatsonError, WatsonErrorKind},
+    utils::errors::{WatsonError, WatsonErrorKind},
     watson_err,
 };
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub enum DateTimeSpec {
     Date(NaiveDate),
     DateTime { value: DateTime<Utc> },
@@ -120,7 +120,7 @@ fn windows_to_iana(tzid: &str) -> String {
     }
 }
 
-#[derive(Default, Debug, Clone, PartialEq, Deserialize)]
+#[derive(Default, Debug, Clone, PartialEq, Deserialize, Serialize)]
 pub struct Attendee {
     pub email: Option<String>,
     #[serde(rename = "cn")]
@@ -167,7 +167,7 @@ impl TryFrom<ical::property::Property> for Attendee {
     }
 }
 
-#[derive(Default, Debug, Clone, PartialEq)]
+#[derive(Default, Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct RecurrenceRule {
     // e.g. "FREQ=WEEKLY;INTERVAL=2;BYDAY=TU"
     pub raw: String,

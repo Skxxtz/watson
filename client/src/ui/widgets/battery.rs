@@ -5,8 +5,8 @@ use crate::{
     ui::widgets::utils::{CairoShapesExt, Rgba, WidgetOption},
 };
 use common::{
-    errors::{WatsonError, WatsonErrorKind},
     protocol::BatteryState,
+    utils::errors::{WatsonError, WatsonErrorKind},
     watson_err,
 };
 use gtk4::{
@@ -324,7 +324,7 @@ impl BatteryStatus {
 
             match capacity_opt {
                 Ok(c) => c,
-                Err(e) => return Err(watson_err!(WatsonErrorKind::Deserialization, e.to_string())),
+                Err(e) => return Err(watson_err!(WatsonErrorKind::Deserialize, e.to_string())),
             }
         };
 

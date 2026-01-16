@@ -1,25 +1,26 @@
 use std::{cell::Cell, sync::Arc};
 
-use chrono::{DateTime, Datelike, Local, NaiveDate, NaiveTime, Utc, Weekday};
+use chrono::{DateTime, Datelike, Days, Local, NaiveDate, Utc, Weekday};
 use ical::parser::ical::component::IcalEvent;
+use serde::{Deserialize, Serialize};
 
 use crate::{
     calendar::utils::{
         funcs::{last_day_of_month, parse_exdate, parse_rdate, parse_until, parse_utc},
         structs::{Attendee, DateTimeSpec, RecurrenceRule},
     },
-    errors::{WatsonError, WatsonErrorKind},
+    utils::errors::{WatsonError, WatsonErrorKind},
     watson_err,
 };
 
-#[derive(Default, Debug, Clone, PartialEq)]
+#[derive(Default, Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct CalendarInfo {
     pub href: String,
     pub name: String,
     pub color: Option<String>,
 }
 
-#[derive(Default, Debug, Clone, PartialEq)]
+#[derive(Default, Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct CalDavEvent {
     pub uid: String,
 
@@ -59,7 +60,7 @@ impl TryFrom<IcalEvent> for CalDavEvent {
             match prop.name.as_str() {
                 "UID" => {
                     out.uid = prop.value.ok_or_else(|| {
-                        watson_err!(WatsonErrorKind::Deserialization, "ICalEvent missing UID")
+                        watson_err!(WatsonErrorKind::Deserialize, "ICalEvent missing UID")
                     })?;
                 }
 
@@ -105,14 +106,14 @@ impl TryFrom<IcalEvent> for CalDavEvent {
             }
         } else {
             return Err(watson_err!(
-                WatsonErrorKind::Deserialization,
+                WatsonErrorKind::Deserialize,
                 "Failed to deserialize ICalEvent into CalDavEvent. (Missing start event)"
             ));
         };
 
         if out.uid.is_empty() {
             Err(watson_err!(
-                WatsonErrorKind::Deserialization,
+                WatsonErrorKind::Deserialize,
                 "Failed to deserialize ICalEvent into CalDavEvent. (Empty UID)"
             ))
         } else {
@@ -121,7 +122,7 @@ impl TryFrom<IcalEvent> for CalDavEvent {
     }
 }
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub enum CalEventType {
     Timed,
     AllDay,
@@ -139,7 +140,7 @@ impl CalDavEvent {
         };
 
         let start_local = start.utc_time().with_timezone(&Local).date_naive();
-        let end_local = self
+        let mut end_local = self
             .end
             .as_ref()
             .map(|e| e.utc_time().with_timezone(&Local).date_naive())
@@ -149,6 +150,12 @@ impl CalDavEvent {
             let handler = RecurrenceHandler::from_raw(&recurrence.raw, &self.rdates, &self.exdates);
             let active = handler.is_active_on(&start_local, day_to_check);
             return active;
+        }
+
+        if self.event_type == CalEventType::AllDay {
+            if let Some(new_end) = end_local.checked_sub_days(Days::new(1)) {
+                end_local = new_end;
+            }
         }
 
         *day_to_check >= start_local && *day_to_check <= end_local
@@ -304,12 +311,10 @@ impl<'d> RecurrenceHandler<'d> {
     pub fn is_active_on(&self, dt_start: &NaiveDate, target: &NaiveDate) -> bool {
         // UNTIL early return
         if let Some(u) = &self.until {
-            if target
-                .and_time(NaiveTime::from_hms_opt(0, 0, 0).unwrap())
-                .and_utc()
-                .timestamp()
-                > *u
-            {
+            let until_date = DateTime::from_timestamp(*u, 0)
+                .map(|dt| dt.date_naive())
+                .unwrap_or(NaiveDate::MAX);
+            if *target > until_date {
                 return false;
             }
         }

@@ -1,11 +1,14 @@
-use common::errors::{WatsonError, WatsonErrorKind};
-use common::protocol::{Request, SocketData};
+use common::protocol::{AtomicSystemState, Request, Response, SocketData, UpdateField};
 use common::tokio::{AsyncSizedMessage, SizedMessageObj};
+use common::utils::errors::{WatsonError, WatsonErrorKind};
 use common::watson_err;
 use std::mem::discriminant;
+use std::sync::Arc;
+use std::sync::atomic::Ordering;
+use std::time::{Duration, Instant};
 use tokio::net::UnixStream;
 use tokio::net::unix::{OwnedReadHalf, OwnedWriteHalf};
-use tokio::sync::{broadcast, mpsc};
+use tokio::sync::{Notify, broadcast, mpsc};
 
 pub struct ClientConnection {
     writer: OwnedWriteHalf,
@@ -24,8 +27,10 @@ impl ClientConnection {
     }
     pub async fn spawn_engine(
         self,
-        response_tx: broadcast::Sender<Vec<u8>>,
-    ) -> mpsc::UnboundedSender<Request> {
+        response_tx: broadcast::Sender<Response>,
+        state: Arc<AtomicSystemState>,
+        notify: Arc<Notify>,
+    ) -> Result<mpsc::UnboundedSender<Request>, WatsonError> {
         let (mut reader, mut writer) = (self.reader, self.writer);
         let (request_tx, mut request_rx) = mpsc::unbounded_channel::<Request>();
 
@@ -56,19 +61,66 @@ impl ClientConnection {
         });
         // 2. Task for READING from the Daemon
         tokio::spawn(async move {
+            let mut throttle = Throttle::new(60);
+
             loop {
                 match reader.read_sized().await {
                     Ok(buf) => {
-                        let _ = response_tx.send(buf);
+                        if let Ok(v) = bincode::deserialize::<Response>(&buf) {
+                            match v {
+                                Response::VolumeState { percentage } => {
+                                    state.volume.store(percentage, Ordering::Relaxed);
+                                    state.updated.fetch_or(
+                                        1 << UpdateField::Volume as u8,
+                                        Ordering::Relaxed,
+                                    );
+
+                                    if throttle.can_notify() {
+                                        notify.notify_one();
+                                    }
+                                }
+                                Response::SystemState(s) => {
+                                    state.update_from_state(s);
+
+                                    if throttle.can_notify() {
+                                        notify.notify_one();
+                                    }
+                                }
+                                _ => {
+                                    let _result = response_tx.send(v);
+                                }
+                            }
+                        }
                     }
-                    Err(e) => {
-                        eprintln!("Daemon connection lost: {:?}", e);
-                        break;
-                    }
+                    Err(_) => break,
                 }
             }
         });
 
-        request_tx // Return this so the UI can send Pings, etc.
+        Ok(request_tx) // Return this so the UI can send Pings, etc.
+    }
+}
+
+struct Throttle {
+    last_sent: Instant,
+    interval: Duration,
+}
+
+impl Throttle {
+    fn new(fps: u64) -> Self {
+        Self {
+            last_sent: Instant::now() - Duration::from_secs(1),
+            interval: Duration::from_millis(1000 / fps),
+        }
+    }
+
+    fn can_notify(&mut self) -> bool {
+        let now = Instant::now();
+        if now.duration_since(self.last_sent) >= self.interval {
+            self.last_sent = now;
+            true
+        } else {
+            false
+        }
     }
 }

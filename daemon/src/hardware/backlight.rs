@@ -1,7 +1,7 @@
 use std::{fs, path::PathBuf};
 
 use common::{
-    errors::{WatsonError, WatsonErrorKind},
+    utils::errors::{WatsonError, WatsonErrorKind},
     watson_err,
 };
 use zbus::Proxy;
@@ -94,7 +94,7 @@ impl HardwareController {
                 .map_err(|e| watson_err!(WatsonErrorKind::FileRead, e.to_string()))?;
             let current: u32 = current_raw.trim().parse().map_err(|_| {
                 watson_err!(
-                    WatsonErrorKind::Deserialization,
+                    WatsonErrorKind::Deserialize,
                     "Failed to parse current brightness as u32."
                 )
             })?;

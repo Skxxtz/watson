@@ -1,14 +1,15 @@
 use async_trait::async_trait;
-use common::errors::{WatsonError, WatsonErrorKind};
 use common::protocol::{
     BatteryState, DaemonService, InternalMessage, IntoResponse, Request, Response, SocketData,
 };
+use common::utils::errors::{WatsonError, WatsonErrorKind};
 use common::watson_err;
 use futures_util::StreamExt;
 use std::collections::HashMap;
-use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
-use tokio::sync::Notify;
+use std::sync::{Arc, OnceLock};
+use tokio::sync::broadcast::Sender;
+use tokio::sync::mpsc;
 use tokio::{
     net::{UnixListener, UnixStream},
     sync::{RwLock, broadcast},
@@ -24,18 +25,44 @@ mod notify;
 mod service_reg;
 use notify::{DaemonHandle, NotificationDaemon};
 
-use crate::hardware::SystemStateBuilder;
+use crate::hardware::{AudioCommand, SystemStateBuilder, audio_actor};
+
+static DAEMON_TX: OnceLock<Sender<InternalMessage>> = OnceLock::new();
 
 #[tokio::main]
 async fn main() -> Result<(), WatsonError> {
     let (tx, rx) = broadcast::channel::<InternalMessage>(16);
-    let daemon = Arc::new(RwLock::new(NotificationDaemon::new(tx.clone()).await?));
+    DAEMON_TX.set(tx).expect("Failed to set daemon_tx");
 
-    let _result = tokio::spawn(battery_state_listener(
-        tx.clone(),
-        Arc::clone(&daemon.read().await.wake_signal),
-        Arc::clone(&daemon),
-    ));
+    let daemon_raw = NotificationDaemon::new().await?;
+    let wake_signal = Arc::clone(&daemon_raw.wake_signal);
+    let daemon = Arc::new(RwLock::new(daemon_raw));
+
+    // Start Battery Service
+    let _result = tokio::spawn(battery_state_listener(Arc::clone(&daemon)));
+
+    // Start Audio Service
+    let audio_tx = {
+        let (audio_tx, audio_rx) = mpsc::channel::<AudioCommand>(16);
+        std::thread::spawn({
+            let audio_tx = audio_tx.clone();
+            let register = Arc::clone(&daemon.read().await.register);
+            move || {
+                let rt = tokio::runtime::Builder::new_current_thread()
+                    .enable_all()
+                    .build()
+                    .unwrap();
+
+                rt.block_on(async move {
+                    audio_actor(audio_tx, audio_rx, Arc::clone(&wake_signal), register).await
+                });
+            }
+        });
+        audio_tx
+    };
+    daemon.write().await.hardware.set_audio_state(audio_tx);
+
+    // Start Dbus Service
     let _result = tokio::spawn(dbus_listener(Arc::clone(&daemon)));
 
     // Setup Server
@@ -81,11 +108,7 @@ async fn dbus_listener(daemon: Arc<RwLock<NotificationDaemon>>) -> zbus::Result<
     Ok(())
 }
 
-async fn battery_state_listener(
-    sender: broadcast::Sender<InternalMessage>,
-    wake_signal: Arc<Notify>,
-    daemon: Arc<RwLock<NotificationDaemon>>,
-) -> zbus::Result<()> {
+async fn battery_state_listener(daemon: Arc<RwLock<NotificationDaemon>>) -> zbus::Result<()> {
     let conn = Connection::system().await?;
     let proxy = zbus::Proxy::new(
         &conn,
@@ -94,6 +117,8 @@ async fn battery_state_listener(
         "org.freedesktop.DBus.Properties",
     )
     .await?;
+
+    let wake_signal = Arc::clone(&daemon.read().await.wake_signal);
 
     let mut stream = proxy.receive_signal("PropertiesChanged").await?;
 
@@ -149,10 +174,10 @@ async fn battery_state_listener(
                 // Check for changes
                 if let Ok(percentage) = BatteryState::capacity() {
                     if changed_significantly && last_state != BatteryState::Invalid {
-                        let _ = sender.send(InternalMessage::BatteryState {
+                        let _ = DAEMON_TX.get().map(|d| d.send(InternalMessage::BatteryState {
                             state: last_state,
                             percentage,
-                        });
+                        }));
                     }
                 }
 
@@ -212,10 +237,11 @@ async fn handle_client(
                         let daemon = daemon.read().await;
                         Response::Notification(daemon.get_by_id(id).cloned())
                     }
-                    InternalMessage::BatteryState { state, percentage } => Response::BatteryStateChange {
+                    InternalMessage::BatteryState { state, percentage } => Response::BatteryState {
                         state,
                         percentage
-                    }
+                    },
+                    InternalMessage::VolumeStateChange { percentage } => Response::VolumeState { percentage },
                 };
 
                 if let Ok(out) = SizedMessageObj::from_struct(&resp) {
@@ -251,24 +277,30 @@ impl RequestHandler for Request {
                 Response::Ok
             }
             Request::RegisterServices(services) => {
-                daemon.register.registered_services(services);
+                daemon.register.set_registered_services(services);
                 println!("Registered required services. {}", daemon.register);
                 // Wake services
-                daemon.wake_signal.notify_one();
-                Response::Ok
+                daemon.wake_signal.notify_waiters();
+
+                match SystemStateBuilder::new(&mut daemon.hardware).await {
+                    Ok(state) => Response::SystemState(state),
+                    Err(e) => Response::Error(e.message),
+                }
             }
             Request::SetWifi(enabled) => daemon.hardware.set_wifi(enabled).await.into_response(),
             Request::SetBluetooth(enabled) => {
                 daemon.hardware.set_bluetooth(enabled).await.into_response()
             }
-            Request::SetPowerMode(mode) => {
-                daemon.hardware.set_powermode(mode).await.into_response()
-            }
+            Request::SetPowerMode(mode) => daemon
+                .hardware
+                .set_powermode(mode.into())
+                .await
+                .into_response(),
             Request::SetBacklight(perc) => {
                 daemon.hardware.set_brightness(perc).await.into_response()
             }
             Request::SetVolume(perc) => daemon.hardware.set_volume(perc).await.into_response(),
-            Request::SystemState => match SystemStateBuilder::new().await {
+            Request::SystemState => match SystemStateBuilder::new(&mut daemon.hardware).await {
                 Ok(state) => Response::SystemState(state),
                 Err(e) => Response::Error(e.message),
             },

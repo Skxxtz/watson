@@ -21,7 +21,7 @@ use crate::{
     calendar::{
         google::GoogleCalendarClient, icloud::ICloudCalendarClient, protocol::CalendarProvider,
     },
-    errors::{WatsonError, WatsonErrorKind},
+    utils::errors::{WatsonError, WatsonErrorKind},
     watson_err,
 };
 
@@ -303,7 +303,7 @@ impl Credential {
             if let CredentialSecret::Encrypted { nonce, ciphertext } = field {
                 let decrypted_bytes = decrypt(ciphertext, key, nonce, aad.as_bytes())?;
                 let decrypted = String::from_utf8(decrypted_bytes)
-                    .map_err(|e| watson_err!(WatsonErrorKind::Deserialization, e.to_string()))?;
+                    .map_err(|e| watson_err!(WatsonErrorKind::Deserialize, e.to_string()))?;
                 *field = CredentialSecret::Decrypted(decrypted);
             }
             Ok(())
@@ -482,7 +482,7 @@ impl CredentialManager {
             Ok(file) => {
                 let reader = BufReader::new(file);
                 let credentials: Vec<CredentialSerde> = serde_json::from_reader(reader)
-                    .map_err(|e| watson_err!(WatsonErrorKind::Deserialization, e.to_string()))?;
+                    .map_err(|e| watson_err!(WatsonErrorKind::Deserialize, e.to_string()))?;
 
                 credentials
                     .into_iter()
@@ -527,7 +527,7 @@ impl CredentialManager {
         let payload: Vec<CredentialSerde> =
             self.credentials.iter().cloned().map(Into::into).collect();
         let json = serde_json::to_vec(&payload)
-            .map_err(|e| watson_err!(WatsonErrorKind::Serialization, e.to_string()))?;
+            .map_err(|e| watson_err!(WatsonErrorKind::Serialize, e.to_string()))?;
 
         file.write_all(&json)
             .map_err(|e| watson_err!(WatsonErrorKind::FileWrite, e.to_string()))?;

@@ -1,5 +1,8 @@
 use common::protocol::DaemonService;
-use std::fmt::Display;
+use std::{
+    fmt::Display,
+    sync::atomic::{AtomicU8, Ordering},
+};
 use strum::IntoEnumIterator;
 
 pub struct ServiceRegister {
@@ -8,33 +11,42 @@ pub struct ServiceRegister {
     /// 00000000
     /// 0. BatteryStateListener
     /// ```
-    registered_services: u8,
+    registered_services: AtomicU8,
 }
 #[allow(dead_code)]
 impl ServiceRegister {
     pub fn new() -> Self {
         Self {
-            registered_services: 0,
+            registered_services: AtomicU8::new(0),
         }
     }
-    pub fn register(&mut self, service: DaemonService) {
-        self.registered_services |= 1 << service as u8;
+
+    pub fn register(&self, service: DaemonService) {
+        self.registered_services
+            .fetch_or(1 << service as u8, Ordering::Relaxed);
     }
-    pub fn unregister(&mut self, service: DaemonService) {
-        self.registered_services &= !(1 << service as u8);
+
+    pub fn unregister(&self, service: DaemonService) {
+        self.registered_services
+            .fetch_and(!(1 << service as u8), Ordering::Relaxed);
     }
+
     pub fn is_active(&self, service: DaemonService) -> bool {
-        let service_mask = 1 << service as u8;
-        (self.registered_services & service_mask) != 0
+        let mask = 1 << service as u8;
+        (self.registered_services.load(Ordering::Relaxed) & mask) != 0
     }
+
     pub fn has_any_listeners(&self) -> bool {
-        self.registered_services != 0
+        self.registered_services.load(Ordering::Relaxed) != 0
     }
-    pub fn registered_services(&mut self, services: u8) {
-        self.registered_services |= services;
+
+    pub fn set_registered_services(&self, services: u8) {
+        self.registered_services
+            .fetch_or(services, Ordering::Relaxed);
     }
-    pub fn clear(&mut self) {
-        self.registered_services = 0;
+
+    pub fn clear(&self) {
+        self.registered_services.store(0, Ordering::Relaxed);
     }
 }
 impl Display for ServiceRegister {

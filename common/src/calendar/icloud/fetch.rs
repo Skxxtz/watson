@@ -17,7 +17,7 @@ use crate::{
         protocol::CalendarProvider,
         utils::{CalDavEvent, CalendarInfo},
     },
-    errors::{WatsonError, WatsonErrorKind},
+    utils::errors::{WatsonError, WatsonErrorKind},
     watson_err,
 };
 
@@ -104,7 +104,7 @@ impl ICloudCalendarClient {
         let text = resp
             .text()
             .await
-            .map_err(|e| watson_err!(WatsonErrorKind::Deserialization, e.to_string()))?;
+            .map_err(|e| watson_err!(WatsonErrorKind::Deserialize, e.to_string()))?;
 
         Ok(text)
     }

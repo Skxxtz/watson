@@ -37,8 +37,8 @@ pub enum WatsonErrorKind {
 
     HttpPostRequest,
     HttpGetRequest,
-    Deserialization,
-    Serialization,
+    Deserialize,
+    Serialize,
 
     DateParse,
 

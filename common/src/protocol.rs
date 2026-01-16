@@ -3,6 +3,7 @@ use std::{
     io::{Read, Write},
     ops::Not,
     os::unix::net::UnixStream,
+    sync::atomic::{AtomicBool, AtomicU8, Ordering},
 };
 
 use serde::{Deserialize, Serialize};
@@ -10,8 +11,8 @@ use strum::{AsRefStr, EnumIter};
 use zbus::zvariant::OwnedValue;
 
 use crate::{
-    errors::{WatsonError, WatsonErrorKind},
     notification::Notification,
+    utils::errors::{WatsonError, WatsonErrorKind},
     watson_err,
 };
 
@@ -45,20 +46,89 @@ impl BatteryState {
 
             match capacity_opt {
                 Ok(c) => c,
-                Err(e) => return Err(watson_err!(WatsonErrorKind::Deserialization, e.to_string())),
+                Err(e) => return Err(watson_err!(WatsonErrorKind::Deserialize, e.to_string())),
             }
         };
         Ok(capacity)
     }
 }
 
-#[derive(Deserialize, Serialize, Debug, Clone, Default)]
+#[derive(Debug, Clone, Default)]
 pub struct SystemState {
     pub wifi: Cell<bool>,
     pub bluetooth: Cell<bool>,
-    pub powermode: Cell<PowerMode>,
+    pub powermode: Cell<u8>,
     pub brightness: Cell<u8>,
     pub volume: Cell<u8>,
+}
+#[derive(Deserialize, Serialize, Debug, Clone, Default)]
+pub struct SystemStateRaw {
+    pub wifi: bool,
+    pub bluetooth: bool,
+    pub powermode: u8,
+    pub brightness: u8,
+    pub volume: u8,
+}
+#[derive(Debug, Default)]
+pub struct AtomicSystemState {
+    pub initialized: AtomicBool,
+    pub updated: AtomicU8,
+    pub wifi: AtomicBool,
+    pub bluetooth: AtomicBool,
+    pub powermode: AtomicU8,
+    pub brightness: AtomicU8,
+    pub volume: AtomicU8,
+}
+
+#[repr(u8)]
+#[derive(Default)]
+pub enum UpdateField {
+    #[default]
+    None = 0,
+    Init = 1,
+    Wifi = 2,
+    Bluetooth = 3,
+    Powermode = 4,
+    Brightness = 5,
+    Volume = 6,
+}
+impl From<u8> for UpdateField {
+    fn from(v: u8) -> Self {
+        match v {
+            1 => Self::Init,
+            2 => Self::Wifi,
+            3 => Self::Bluetooth,
+            4 => Self::Powermode,
+            5 => Self::Brightness,
+            6 => Self::Volume,
+            _ => Self::None,
+        }
+    }
+}
+
+impl AtomicSystemState {
+    pub fn update_from_state(&self, state: SystemStateRaw) {
+        self.initialized.store(true, Ordering::Relaxed);
+        self.updated
+            .fetch_or(1 << UpdateField::Init as u8, Ordering::Relaxed);
+        self.wifi.store(state.wifi, Ordering::Relaxed);
+        self.bluetooth.store(state.bluetooth, Ordering::Relaxed);
+        self.powermode.store(state.powermode, Ordering::Relaxed);
+        self.brightness.store(state.brightness, Ordering::Relaxed);
+        self.volume.store(state.volume, Ordering::Relaxed);
+    }
+}
+
+impl From<&SystemStateRaw> for SystemState {
+    fn from(v: &SystemStateRaw) -> Self {
+        Self {
+            wifi: Cell::new(v.wifi),
+            bluetooth: Cell::new(v.bluetooth),
+            powermode: Cell::new(v.powermode),
+            brightness: Cell::new(v.brightness),
+            volume: Cell::new(v.volume),
+        }
+    }
 }
 
 #[derive(Clone, Copy, Debug, Serialize, Deserialize)]
@@ -68,6 +138,9 @@ pub enum InternalMessage {
         percentage: u32,
     },
     Notification(u32),
+    VolumeStateChange {
+        percentage: u8,
+    },
 }
 
 #[derive(Deserialize, Serialize, Debug, Clone)]
@@ -81,11 +154,22 @@ pub enum Response {
     },
     Notification(Option<Notification>),
     Notifications(Vec<Notification>),
-    BatteryStateChange {
+    SystemState(SystemStateRaw),
+    BatteryState {
         state: BatteryState,
         percentage: u32,
     },
-    SystemState(SystemState),
+    VolumeState {
+        percentage: u8,
+    },
+}
+impl Response {
+    pub fn is_state_change(&self) -> bool {
+        match self {
+            Self::SystemState(_) | Self::VolumeState { .. } | Self::BatteryState { .. } => true,
+            _ => false,
+        }
+    }
 }
 pub trait IntoResponse {
     fn into_response(self) -> Response;
@@ -112,7 +196,7 @@ pub enum Request {
     SystemState,
     SetWifi(bool),
     SetBluetooth(bool),
-    SetPowerMode(PowerMode),
+    SetPowerMode(u8),
     SetBacklight(u8),
     SetVolume(u8),
 }
@@ -126,6 +210,25 @@ pub enum PowerMode {
     Balanced,
     #[serde(rename = "performance")]
     Performace,
+}
+impl From<u8> for PowerMode {
+    fn from(v: u8) -> Self {
+        match v {
+            0 => Self::PowerSave,
+            1 => Self::Balanced,
+            2 => Self::Performace,
+            _ => Self::Balanced,
+        }
+    }
+}
+impl From<PowerMode> for u8 {
+    fn from(v: PowerMode) -> Self {
+        match v {
+            PowerMode::PowerSave => 0,
+            PowerMode::Balanced => 1,
+            PowerMode::Performace => 2,
+        }
+    }
 }
 
 impl TryFrom<OwnedValue> for PowerMode {

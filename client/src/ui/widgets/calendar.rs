@@ -1,27 +1,68 @@
 use crate::{
-    config::{CalendarHMFormat, WidgetSpec},
-    ui::widgets::utils::{AnimationDirection, AnimationState, EaseFunction},
+    config::{CalendarHMFormat, CalendarRule, WidgetSpec},
+    ui::{
+        g_templates::event_details::EventDetails,
+        widgets::utils::{AnimationDirection, AnimationState, EaseFunction, WidgetOption},
+    },
 };
-use std::{cell::RefCell, rc::Rc, str::FromStr};
+use std::{
+    cell::RefCell,
+    collections::HashSet,
+    fs,
+    io::{BufReader, BufWriter},
+    rc::Rc,
+    str::FromStr,
+};
 
 use chrono::{Duration, Local, NaiveDate, NaiveDateTime, NaiveTime, Timelike};
 use gtk4::{
-    Align, DrawingArea, GestureClick,
+    Align, Box, DrawingArea, GestureClick, Stack,
     cairo::{Context, FontSlant, FontWeight},
-    glib::object::ObjectExt,
-    prelude::{DrawingAreaExtManual, GestureSingleExt, WidgetExt, WidgetExtManual},
+    glib::{WeakRef, object::ObjectExt},
+    prelude::{BoxExt, DrawingAreaExtManual, GestureSingleExt, WidgetExt, WidgetExtManual},
 };
 
 use crate::ui::widgets::utils::{CairoShapesExt, Rgba};
 use common::{
     auth::CredentialManager,
     calendar::utils::{CalDavEvent, CalEventType},
+    utils::{
+        errors::{WatsonError, WatsonErrorKind},
+        paths::get_cache_dir,
+    },
+    watson_err,
 };
 
+#[derive(Debug)]
+pub struct EventHitbox {
+    pub index: usize,
+    pub x: f64,
+    pub y: f64,
+    pub w: f64,
+    pub h: f64,
+    pub has_neighbor_above: bool,
+}
+#[derive(Default)]
+pub struct CalendarCache {
+    pub last_width: f64,
+    pub last_height: f64,
+    pub last_window_start: NaiveDateTime,
+    pub hitboxes: Vec<EventHitbox>,
+}
+pub struct CalendarConfig<'w> {
+    pub accent_color: &'w str,
+    pub font: &'w str,
+    pub hm_format: &'w CalendarHMFormat,
+    pub hours_past: u8,
+    pub hours_future: u8,
+}
 struct CalendarContext {
     font: String,
     padding: f64,
     padding_top: f64,
+
+    text: Rgba,
+    accent: Rgba,
 
     inner_width: f64,
     inner_height: f64,
@@ -30,17 +71,161 @@ struct CalendarContext {
     todate: NaiveDate,
     window_start: NaiveDateTime,
     window_end: NaiveDateTime,
+    hours_to_show: u32,
     total_seconds: f64,
 
     hm_format: CalendarHMFormat,
+
+    cache: CalendarCache,
+}
+impl CalendarContext {
+    pub fn new(spec: &Rc<WidgetSpec>) -> Self {
+        let default_format = CalendarHMFormat {
+            timeline: "%H:%M".to_string(),
+            event: "H:%M".to_string(),
+        };
+        let CalendarConfig {
+            accent_color,
+            font,
+            hm_format,
+            hours_past,
+            hours_future,
+        } = spec.as_calendar(&default_format);
+
+        // Calculations
+        let hours_to_show = (hours_past + hours_future).clamp(1, 24) as u32;
+        let today = Local::now();
+        let todate = today.date_naive();
+        let now = today.time();
+
+        // Determine window start/end
+        let now_hour = now.hour();
+        let start_hour = if now_hour + hours_to_show > 24 {
+            24 - hours_to_show
+        } else {
+            now_hour.saturating_sub(hours_past as u32)
+        }
+        .min(23);
+
+        let window_start = todate.and_time(NaiveTime::from_hms_opt(start_hour, 0, 0).unwrap());
+        let window_end = window_start + Duration::hours(hours_to_show as i64);
+
+        Self {
+            accent: Rgba::from_str(accent_color).unwrap_or_default(),
+            text: Rgba::default(),
+            font: font.to_string(),
+            padding: 0.0,
+            padding_top: 0.0,
+            inner_width: 0.0,
+            inner_height: 0.0,
+            line_offset: 0.0,
+            todate,
+            window_start,
+            window_end,
+            hours_to_show,
+            total_seconds: (window_end - window_start).num_seconds() as f64,
+            hm_format: hm_format.clone(),
+            cache: CalendarCache::default(),
+        }
+    }
+    fn update(
+        &mut self,
+        area: &DrawingArea,
+        ctx: &Context,
+        width: f64,
+        height: f64,
+        num_events: usize,
+    ) {
+        self.text = area.color().into();
+
+        self.padding = (width as f64 * 0.05).min(20.0);
+        self.padding_top = if num_events != 0 { 120.0 } else { 100.0 };
+        self.inner_width = width - 2.0 * self.padding;
+        self.inner_height = height - self.padding - self.padding_top;
+
+        // Measure time label once for offset
+        ctx.select_font_face(&self.font, FontSlant::Normal, FontWeight::Bold);
+        ctx.set_font_size(12.0);
+        let ext = ctx.text_extents("00:00").unwrap();
+        self.line_offset = ext.width() + 10.0;
+    }
+    fn is_dirty(&self, width: f64, height: f64) -> bool {
+        self.cache.hitboxes.is_empty()
+            || self.cache.last_width != width
+            || self.cache.last_height != height
+            || self.cache.last_window_start != self.window_start
+    }
 }
 
-pub struct Calendar;
-impl Calendar {
-    pub fn new(specs: &WidgetSpec) -> DrawingArea {
-        let specs = Rc::new(specs.clone());
+#[derive(Default)]
+pub struct CalendarBuilder {
+    area: WidgetOption<DrawingArea>,
+    stack: WidgetOption<Stack>,
+    details: WidgetOption<EventDetails>,
+}
+impl CalendarBuilder {
+    fn connect_signals(
+        area: &DrawingArea,
+        stack: &Stack,
+        details: &EventDetails,
+        context: Rc<RefCell<CalendarContext>>,
+        data: Rc<CalendarDataStore>,
+    ) {
+        // Create a GestureClick controller
+        let click = GestureClick::new();
+        click.set_button(0);
+
+        // Connect to the clicked signal
+        click.connect_pressed({
+            let stack_weak = stack.downgrade();
+            let details_weak = details.downgrade();
+            move |_gesture, _n_press, x, y| {
+                let Some(stack) = stack_weak.upgrade() else {
+                    return;
+                };
+                let Some(details) = details_weak.upgrade() else {
+                    return;
+                };
+
+                let ctx_borrow = context.borrow();
+                let events_borrow = data.timed.borrow();
+                let hit =
+                    ctx_borrow.cache.hitboxes.iter().rev().find(|hb| {
+                        x >= hb.x && x <= (hb.x + hb.w) && y >= hb.y && y <= (hb.y + hb.h)
+                    });
+
+                if let Some(hitbox) = hit {
+                    if let Some(event) = events_borrow.get(hitbox.index) {
+                        stack.set_visible_child_name("details");
+                        details.set_event(event);
+                    }
+                }
+            }
+        });
+        area.add_controller(click);
+
+        let click = GestureClick::new();
+        click.set_button(0);
+        click.connect_pressed({
+            let stack_weak = stack.downgrade();
+            move |_gesture, _n_press, _x, _y| {
+                let Some(stack) = stack_weak.upgrade() else {
+                    return;
+                };
+
+                stack.set_visible_child_name("calendar");
+            }
+        });
+        details.add_controller(click);
+    }
+    pub fn for_spec(mut self, specs: &WidgetSpec) -> Self {
         let state = Rc::new(AnimationState::new());
+        let specs = Rc::new(specs.clone());
+        let data_store = Rc::new(CalendarDataStore::new(&specs));
+        let context = Rc::new(RefCell::new(CalendarContext::new(&specs)));
+
         let base = specs.base();
+        let _ = data_store.load_from_cache();
 
         let mut height = 400;
 
@@ -50,22 +235,34 @@ impl Calendar {
             ..
         } = specs.as_ref()
         {
-            let span = (*hours_past + *hours_future).clamp(1, 24);
+            let span = (hours_past + hours_future).clamp(1, 24);
             let tmp = 200 + span as i32 * 50;
             height = tmp - tmp % 100;
         };
 
-        let events_timed = Rc::new(RefCell::new(Vec::new()));
-        let events_allday = Rc::new(RefCell::new(Vec::new()));
-        let calendar_area = DrawingArea::builder()
+        let stack = Stack::builder()
             .vexpand(false)
             .hexpand(false)
             .valign(base.valign.map(|d| d.into()).unwrap_or(Align::Start))
             .halign(base.halign.map(|d| d.into()).unwrap_or(Align::Start))
-            .css_classes(["widget", "calendar"])
+            .overflow(gtk4::Overflow::Hidden)
+            .css_classes(["widget", "calendar-holder"])
             .width_request(400)
             .height_request(height)
+            .transition_type(gtk4::StackTransitionType::Crossfade)
+            .transition_duration(250)
+            .interpolate_size(true)
             .build();
+
+        let calendar_area = DrawingArea::builder()
+            .vexpand(true)
+            .hexpand(true)
+            .css_classes(["inner-widget", "calendar"])
+            .build();
+        stack.add_named(&calendar_area, Some("calendar"));
+
+        let detail_box = EventDetails::new();
+        stack.add_named(&detail_box, Some("details"));
 
         if let Some(id) = specs.id() {
             calendar_area.set_widget_name(id);
@@ -76,25 +273,41 @@ impl Calendar {
 
         // Draw function
         calendar_area.set_draw_func({
-            let events_timed = Rc::clone(&events_timed);
-            let events_allday = Rc::clone(&events_allday);
-            let specs = Rc::clone(&specs);
+            let data_store = Rc::clone(&data_store);
             let state = Rc::clone(&state);
+            let context = Rc::clone(&context);
             move |area, ctx, width, height| {
+                let mut context = context.borrow_mut();
+                let w = width as f64;
+                let h = height as f64;
+
+                {
+                    let events_timed = data_store.timed.borrow();
+                    context.update(area, ctx, w, h, events_timed.len());
+
+                    if context.is_dirty(w, h) {
+                        context.cache.hitboxes = compute_event_hitboxes(&*events_timed, &context);
+                        context.cache.last_window_start = context.window_start;
+                    }
+                }
+
                 Calendar::draw(
                     area,
                     ctx,
-                    width,
-                    height,
-                    &events_allday.borrow(),
-                    &events_timed.borrow(),
-                    &specs,
+                    &context,
+                    Rc::clone(&data_store),
                     Rc::clone(&state),
                 );
             }
         });
 
-        Self::connect_clicked(&calendar_area);
+        Self::connect_signals(
+            &calendar_area,
+            &stack,
+            &detail_box,
+            Rc::clone(&context),
+            Rc::clone(&data_store),
+        );
 
         // Minute interval redraw
         gtk4::glib::timeout_add_seconds_local(60, {
@@ -118,243 +331,173 @@ impl Calendar {
                 gtk4::glib::ControlFlow::Continue
             }
         });
+        state.start(AnimationDirection::Forward {
+            duration: 0.0,
+            function: EaseFunction::None,
+        });
 
         // Get the calendar events async
         gtk4::glib::MainContext::default().spawn_local({
-            let events_timed = Rc::clone(&events_timed);
-            let events_allday = Rc::clone(&events_allday);
             let state = Rc::clone(&state);
             async move {
-                let mut credential_manager = match CredentialManager::new() {
-                    Ok(m) => m,
-                    Err(e) => {
-                        eprintln!("{:?}", e);
-                        return;
-                    }
-                };
-                if let Err(e) = credential_manager.unlock() {
-                    eprintln!("{:?}", e);
-                    return;
-                }
+                let _ = data_store.refresh().await;
 
-                for account in credential_manager.credentials {
-                    let Some(mut provider) = account.provider() else {
-                        continue;
-                    };
-
-                    if let Err(e) = provider.init().await {
-                        // TODO: Log err
-                        eprintln!("{:?}", e);
-                        continue;
-                    }
-
-                    let calendars = match provider.get_calendars().await {
-                        Ok(v) => v,
-                        Err(e) => {
-                            // TODO: Log err
-                            eprintln!("{:?}", e);
-                            continue;
-                        }
-                    };
-
-                    let mut events = match provider.get_events(calendars).await {
-                        Ok(v) => v,
-                        Err(e) => {
-                            // TODO: Log err
-                            eprintln!("{:?}", e);
-                            continue;
-                        }
-                    };
-
-                    // Filter events
-                    let today = Local::now().date_naive();
-                    if let WidgetSpec::Calendar { selection, .. } = specs.as_ref() {
-                        events.retain(|e| {
-                            selection
-                                .as_ref()
-                                .map_or(true, |s| s.is_allowed(&e.calendar_info.name))
-                                && e.occurs_on_day(&today)
-                        });
-                    } else {
-                        events.retain(|e| e.occurs_on_day(&today));
-                    }
-
-                    // Extend the Events
-                    {
-                        let mut timed_borrow = events_timed.borrow_mut();
-                        let mut allday_borrow = events_allday.borrow_mut();
-
-                        for item in events {
-                            match item.event_type {
-                                CalEventType::Timed => timed_borrow.push(item),
-                                CalEventType::AllDay => allday_borrow.push(item),
-                            }
-                        }
-                    }
-
-                    // Internally ques draw
-                    state.start(AnimationDirection::Forward {
-                        duration: 0.7,
-                        function: EaseFunction::EaseOutCubic,
-                    });
-                }
+                // Internally ques draw
+                state.start(AnimationDirection::Forward {
+                    duration: 0.7,
+                    function: EaseFunction::EaseOutCubic,
+                });
             }
         });
 
-        calendar_area
+        self.area = WidgetOption::Owned(calendar_area);
+        self.stack = WidgetOption::Owned(stack);
+        self.details = WidgetOption::Owned(detail_box);
+        self
     }
-    fn connect_clicked(area: &DrawingArea) {
-        // Create a GestureClick controller
-        let click = GestureClick::new();
-        click.set_button(0);
 
-        // Connect to the clicked signal
-        click.connect_pressed(move |_gesture, n_press, x, y| {
-            println!("Clicked {} times at ({}, {})", n_press, x, y);
-        });
-
-        area.add_controller(click);
+    pub fn for_box(self, container: &Box) -> Self {
+        match &self.stack {
+            WidgetOption::Owned(stack) => {
+                container.append(stack);
+            }
+            WidgetOption::Borrowed(weak) => {
+                if let Some(stack) = weak.upgrade() {
+                    container.append(&stack);
+                }
+            }
+        }
+        self
     }
-    pub fn draw(
-        area: &DrawingArea,
+
+    pub fn build(self) -> Calendar {
+        Calendar {
+            area: self.area.weak(),
+            stack: self.stack.weak(),
+            details: self.details.weak(),
+        }
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct Calendar {
+    pub area: WeakRef<DrawingArea>,
+    pub stack: WeakRef<Stack>,
+    pub details: WeakRef<EventDetails>,
+}
+impl Calendar {
+    pub fn builder() -> CalendarBuilder {
+        CalendarBuilder::default()
+    }
+    fn draw(
+        _area: &DrawingArea,
         ctx: &Context,
-        width: i32,
-        height: i32,
-        events_allday: &[CalDavEvent],
-        events_timed: &[CalDavEvent],
-        spec: &WidgetSpec,
+        calendar_context: &CalendarContext,
+        data_store: Rc<CalendarDataStore>,
         state: Rc<AnimationState>,
     ) {
-        let WidgetSpec::Calendar {
-            accent_color,
-            font,
-            hours_past,
-            hours_future,
-            hm_format,
-            ..
-        } = spec
-        else {
-            return;
-        };
-
-        // Calculations
-        let hours_to_show = (*hours_past + *hours_future).clamp(1, 24) as u32;
-        let today = Local::now();
-        let todate = today.date_naive();
-        let now = today.time();
-
-        // Determine window start/end
-        let now_hour = now.hour();
-        let start_hour = if now_hour + hours_to_show > 24 {
-            24 - hours_to_show
-        } else {
-            now_hour.saturating_sub(*hours_past as u32)
-        }
-        .min(23);
-
-        let window_start = todate.and_time(NaiveTime::from_hms_opt(start_hour, 0, 0).unwrap());
-        let window_end = window_start + Duration::hours(hours_to_show as i64);
-
-        // Context
-        let color = area.color();
-        let (r_txt, g_txt, b_txt) = (
-            color.red() as f64,
-            color.green() as f64,
-            color.blue() as f64,
-        );
-        let accent = Rgba::from_str(accent_color).unwrap_or_default();
-
-        let context = {
-            let padding = (width as f64 * 0.05).min(20.0);
-            let padding_top = if !events_allday.is_empty() {
-                120.0
-            } else {
-                100.0
-            };
-
-            // Measure time label once for offset
-            ctx.select_font_face(&font, FontSlant::Normal, FontWeight::Bold);
-            ctx.set_font_size(12.0);
-            let ext = ctx.text_extents("00:00").unwrap();
-
-            CalendarContext {
-                font: font.to_string(),
-                padding,
-                padding_top,
-                inner_width: width as f64 - 2.0 * padding,
-                inner_height: height as f64 - padding - padding_top,
-                line_offset: ext.width() + 10.0,
-                todate,
-                window_start,
-                window_end,
-                total_seconds: (window_end - window_start).num_seconds() as f64,
-                hm_format: hm_format.clone(),
-            }
-        };
-
         // Header: Date and Weekday
-        ctx.set_source_rgb(r_txt, g_txt, b_txt);
-        ctx.select_font_face(&context.font, FontSlant::Normal, FontWeight::Normal);
+        ctx.set_source_rgb(
+            calendar_context.text.r,
+            calendar_context.text.g,
+            calendar_context.text.b,
+        );
+        ctx.select_font_face(
+            &calendar_context.font,
+            FontSlant::Normal,
+            FontWeight::Normal,
+        );
         ctx.set_font_size(50.0);
-        let today_string = today.format("%b %-d").to_string();
+        let today_string = calendar_context.todate.format("%b %-d").to_string();
         let ext1 = ctx.text_extents(&today_string).unwrap();
-        ctx.move_to(context.padding, context.padding + ext1.height());
+        ctx.move_to(
+            calendar_context.padding,
+            calendar_context.padding + ext1.height(),
+        );
         ctx.show_text(&today_string).unwrap();
 
-        ctx.set_source_rgba(accent.r, accent.g, accent.b, accent.a);
+        ctx.set_source_rgba(
+            calendar_context.accent.r,
+            calendar_context.accent.g,
+            calendar_context.accent.b,
+            calendar_context.accent.a,
+        );
         ctx.set_font_size(15.0);
-        let weekday_string = today.format("%A").to_string();
-        ctx.move_to(context.padding, context.padding + ext1.height() + 20.0);
+        let weekday_string = calendar_context.todate.format("%A").to_string();
+        ctx.move_to(
+            calendar_context.padding,
+            calendar_context.padding + ext1.height() + 20.0,
+        );
         ctx.show_text(&weekday_string).unwrap();
 
         // Hour lines and timeline
         ctx.set_line_width(0.5);
         ctx.set_line_cap(gtk4::cairo::LineCap::Round);
 
-        for offset in 0..=hours_to_show {
-            let y =
-                (offset as f64 / hours_to_show as f64) * context.inner_height + context.padding_top;
-            let hour = (window_start.hour() + offset as u32) % 24;
+        for offset in 0..=calendar_context.hours_to_show {
+            let y = (offset as f64 / calendar_context.hours_to_show as f64)
+                * calendar_context.inner_height
+                + calendar_context.padding_top;
+            let hour = (calendar_context.window_start.hour() + offset as u32) % 24;
 
             // Draw hour line
-            ctx.set_source_rgba(r_txt, g_txt, b_txt, 0.2); // Low alpha for grid lines
-            ctx.move_to(context.padding + context.line_offset, y);
-            ctx.line_to(context.inner_width + context.padding, y);
+            ctx.set_source_rgba(
+                calendar_context.text.r,
+                calendar_context.text.g,
+                calendar_context.text.b,
+                0.2,
+            ); // Low alpha for grid lines
+            ctx.move_to(calendar_context.padding + calendar_context.line_offset, y);
+            ctx.line_to(calendar_context.inner_width + calendar_context.padding, y);
             ctx.stroke().unwrap();
 
             // Draw hour label
-            ctx.set_source_rgb(r_txt, g_txt, b_txt);
+            ctx.set_source_rgb(
+                calendar_context.text.r,
+                calendar_context.text.g,
+                calendar_context.text.b,
+            );
             ctx.set_font_size(12.0);
             let label = NaiveTime::from_hms_opt(hour, 0, 0)
                 .unwrap()
-                .format(&context.hm_format.timeline)
+                .format(&calendar_context.hm_format.timeline)
                 .to_string();
-            CairoShapesExt::vert_centered_text(ctx, &label, context.padding, y);
+            CairoShapesExt::vert_centered_text(ctx, &label, calendar_context.padding, y);
         }
 
         // Drawing events
         let mut allday_x = 0.0;
-        for event in events_allday {
-            draw_allday_event(ctx, event, &context, &mut allday_x);
+        for event in data_store.allday.borrow().iter() {
+            draw_allday_event(ctx, event, &calendar_context, &mut allday_x);
         }
 
-        let layouts = compute_event_layouts(events_timed, &context);
-        for layout in layouts {
-            draw_event(ctx, layout, &context, state.progress.get());
+        for hitbox in calendar_context.cache.hitboxes.iter() {
+            if let Some(event) = data_store.timed.borrow().get(hitbox.index) {
+                draw_event(ctx, hitbox, event, calendar_context, state.progress.get());
+            }
         }
 
         // Current time indicator
         let now_full = Local::now().naive_local();
-        if now_full >= window_start && now_full <= window_end {
-            let current_y = (now_full - window_start).num_seconds() as f64 / context.total_seconds
-                * context.inner_height
-                + context.padding_top;
-            let x_start = context.padding + context.line_offset - 6.0;
+        if now_full >= calendar_context.window_start && now_full <= calendar_context.window_end {
+            let current_y = (now_full - calendar_context.window_start).num_seconds() as f64
+                / calendar_context.total_seconds
+                * calendar_context.inner_height
+                + calendar_context.padding_top;
+            let x_start = calendar_context.padding + calendar_context.line_offset - 6.0;
 
-            ctx.set_source_rgba(accent.r, accent.g, accent.b, accent.a);
+            ctx.set_source_rgba(
+                calendar_context.accent.r,
+                calendar_context.accent.g,
+                calendar_context.accent.b,
+                calendar_context.accent.a,
+            );
             ctx.set_line_width(2.0);
             ctx.move_to(x_start, current_y);
-            ctx.line_to(context.inner_width + context.padding, current_y);
+            ctx.line_to(
+                calendar_context.inner_width + calendar_context.padding,
+                current_y,
+            );
             ctx.stroke().unwrap();
 
             CairoShapesExt::circle(ctx, x_start, current_y, 3.0);
@@ -365,18 +508,19 @@ impl Calendar {
 
 fn draw_event(
     ctx: &Context,
-    layout: EventLayout,
+    hitbox: &EventHitbox,
+    event: &CalDavEvent,
     context: &CalendarContext,
     progress: f64,
 ) -> Option<()> {
-    let EventLayout {
-        event,
-        start_secs,
-        end_secs,
-        lane,
-        lanes_total,
+    let EventHitbox {
+        x,
+        y,
+        w,
+        h,
         has_neighbor_above,
-    } = layout;
+        ..
+    } = *hitbox;
 
     // Animation State
     let alpha = if event.seen.get() {
@@ -388,36 +532,22 @@ fn draw_event(
         progress
     };
 
-    // Geometry Calculation
-    let start_y = (start_secs / context.total_seconds) * context.inner_height + context.padding_top;
-    let end_y = (end_secs / context.total_seconds) * context.inner_height + context.padding_top;
-    let rect_height = (end_y - start_y).max(18.0); // Minimum height for visibility
-    let lane_width = (context.inner_width - context.line_offset) / lanes_total as f64;
-    let x = context.padding + context.line_offset + (lane as f64 * lane_width);
-
     // Coloring
     let color_str = event.calendar_info.color.as_deref().unwrap_or("#e9a949");
     let base_color = Rgba::from_str(color_str).unwrap_or_default();
 
     // Background
-    let rad = if end_secs > context.total_seconds {
+    let rad = if h > context.inner_height {
         (6.0, 6.0, 0.0, 0.0)
     } else {
         (6.0, 6.0, 6.0, 6.0)
     };
     let neightbor_offset = if has_neighbor_above { 2.5 } else { 0.0 };
 
-    CairoShapesExt::rounded_rectangle(
-        ctx,
-        x + 1.0,
-        start_y + 1.5 + neightbor_offset,
-        lane_width - 3.0,
-        rect_height - 3.0,
-        rad,
-    );
+    CairoShapesExt::rounded_rectangle(ctx, x, y + neightbor_offset, w, h, rad);
 
     // Set background
-    let grad = gtk4::cairo::LinearGradient::new(x, start_y, x, start_y + rect_height);
+    let grad = gtk4::cairo::LinearGradient::new(x, y, x, y + h);
     grad.add_color_stop_rgba(0.0, base_color.r, base_color.g, base_color.b, 0.45 * alpha);
     grad.add_color_stop_rgba(1.0, base_color.r, base_color.g, base_color.b, 0.35 * alpha);
 
@@ -426,7 +556,7 @@ fn draw_event(
 
     // Border
     ctx.save().unwrap();
-    let rim_grad = gtk4::cairo::LinearGradient::new(x, start_y, x, start_y + rect_height);
+    let rim_grad = gtk4::cairo::LinearGradient::new(x, y, x, y + h);
     rim_grad.add_color_stop_rgba(0.0, base_color.r, base_color.g, base_color.b, 0.5 * alpha);
     rim_grad.add_color_stop_rgba(0.5, base_color.r, base_color.g, base_color.b, 0.1 * alpha);
     rim_grad.add_color_stop_rgba(1.0, base_color.r, base_color.g, base_color.b, 0.3 * alpha);
@@ -438,28 +568,28 @@ fn draw_event(
 
     // Text Content
     let summary = &event.title;
-    let start_time = context.window_start + chrono::Duration::seconds(start_secs as i64);
-    let time_str = start_time
-        .time()
-        .format(&context.hm_format.event)
-        .to_string();
+    // let time_str = start_time
+    //     let start_time = context.window_start + chrono::Duration::seconds(start_secs as i64);
+    //     .time()
+    //     .format(&context.hm_format.event)
+    //     .to_string();
 
     // Label
     ctx.set_source_rgba(base_color.r, base_color.g, base_color.b, 0.8 * alpha); // Dark text for light background
     ctx.select_font_face(&context.font, FontSlant::Normal, FontWeight::Bold);
 
-    let is_tiny_event = rect_height < 30.0;
+    let is_tiny_event = h < 30.0;
     let padding_x = 10.0;
 
     if is_tiny_event {
         // Single line layout: [ Summary ... Time ]
         ctx.set_font_size(10.0);
-        let cy = start_y + (rect_height / 2.0);
+        let cy = y + (h / 2.0);
 
         // Only draw time if lane is wide enough
         // let _time_extents = ctx.text_extents(&time_str).unwrap();
-        if lane_width > 100.0 {
-            CairoShapesExt::rjust_text(ctx, &time_str, x + lane_width - 8.0, cy, true);
+        if w > 100.0 {
+            // CairoShapesExt::rjust_text(ctx, &time_str, x + w - 8.0, cy, true);
         }
 
         // Draw summary with clipping (implicit)
@@ -467,21 +597,21 @@ fn draw_event(
     } else {
         // Multi-line layout
         ctx.set_font_size(11.0);
-        ctx.move_to(x + padding_x, start_y + 16.0);
+        ctx.move_to(x + padding_x, y + 16.0);
         ctx.show_text(&summary).unwrap();
 
         ctx.set_font_size(9.0);
         ctx.select_font_face(&context.font, FontSlant::Normal, FontWeight::Normal);
 
         // Time below title
-        ctx.move_to(x + padding_x, start_y + 28.0);
-        ctx.show_text(&time_str).unwrap();
+        // ctx.move_to(x + padding_x, y + 28.0);
+        // ctx.show_text(&time_str).unwrap();
 
         // Location at bottom or 3rd line
         if let Some(loc) = &event.location {
-            if rect_height > 45.0 {
+            if h > 45.0 {
                 let loc_width = ctx.text_extents(&loc).unwrap().width();
-                let inner_width = lane_width - 2.0 * padding_x;
+                let inner_width = w - 2.0 * padding_x;
                 let text = if loc_width > inner_width {
                     let avg_char_width = loc_width / loc.len() as f64;
                     let take_chars = (inner_width / avg_char_width).floor() as usize;
@@ -491,7 +621,7 @@ fn draw_event(
                     loc
                 };
 
-                ctx.move_to(x + padding_x, start_y + 40.0);
+                ctx.move_to(x + padding_x, y + 40.0);
                 ctx.show_text(&text).unwrap();
             }
         }
@@ -535,22 +665,21 @@ fn draw_allday_event(
     CairoShapesExt::centered_text(ctx, &title, x_start + width / 2.0, y_start + height / 2.0);
 }
 
-struct EventLayout<'a> {
-    event: &'a CalDavEvent,
+struct TempLayout {
+    index: usize,
     start_secs: f64,
     end_secs: f64,
-    lane: usize,
-    lanes_total: usize,
-    has_neighbor_above: bool,
+    lane: u8,
 }
+fn compute_event_hitboxes(events: &[CalDavEvent], ctx: &CalendarContext) -> Vec<EventHitbox> {
+    if events.is_empty() {
+        return Vec::new();
+    }
 
-fn compute_event_layouts<'a>(
-    events: &'a [CalDavEvent],
-    ctx: &CalendarContext,
-) -> Vec<EventLayout<'a>> {
-    let mut spans: Vec<_> = events
+    let mut spans: Vec<TempLayout> = events
         .iter()
-        .filter_map(|event| {
+        .enumerate()
+        .filter_map(|(idx, event)| {
             let start = event.start.as_ref()?.utc_time().with_timezone(&Local);
             let end = event.end.as_ref()?.utc_time().with_timezone(&Local);
 
@@ -565,70 +694,51 @@ fn compute_event_layouts<'a>(
             let visible_start = start_dt.max(ctx.window_start);
             let visible_end = end_dt.min(ctx.window_end);
 
-            Some(EventLayout {
-                event,
+            Some(TempLayout {
+                index: idx,
                 start_secs: (visible_start - ctx.window_start).num_seconds() as f64,
                 end_secs: (visible_end - ctx.window_start).num_seconds() as f64,
                 lane: 0,
-                lanes_total: 0,
-                has_neighbor_above: false,
             })
         })
         .collect();
 
-    // 1. Sort by start time
     spans.sort_by(|a, b| a.start_secs.total_cmp(&b.start_secs));
 
-    let mut result = Vec::new();
-    let mut cluster: Vec<EventLayout> = Vec::new();
+    let mut hitboxes = Vec::with_capacity(spans.len());
+    let mut cluster: Vec<TempLayout> = Vec::new();
     let mut cluster_end = 0.0;
 
-    // 2. Group into clusters
-    for layout in spans {
-        if cluster.is_empty() || layout.start_secs < cluster_end {
-            // Event overlaps with the current cluster
-            cluster_end = cluster_end.max(layout.end_secs);
-            cluster.push(layout);
+    for item in spans {
+        if cluster.is_empty() || item.start_secs < cluster_end {
+            cluster_end = cluster_end.max(item.end_secs);
+            cluster.push(item);
         } else {
-            // New cluster started; process the finished one
-            process_cluster(&mut cluster, &mut result);
-            cluster_end = layout.end_secs;
-            cluster.push(layout);
+            flush_cluster_to_hitboxes(&mut cluster, &mut hitboxes, ctx);
+            cluster.clear();
+
+            cluster_end = item.end_secs;
+            cluster.push(item);
         }
     }
+    flush_cluster_to_hitboxes(&mut cluster, &mut hitboxes, ctx);
 
-    // Process final cluster
-    process_cluster(&mut cluster, &mut result);
-
-    for i in 0..result.len() {
-        let mut above = false;
-        for j in 0..result.len() {
-            if i == j || result[i].lane != result[j].lane {
-                continue;
-            }
-
-            // If another event ends exactly when this one starts
-            if (result[j].end_secs - result[i].start_secs).abs() < 1.0 {
-                above = true;
-            }
-        }
-        result[i].has_neighbor_above = above;
-    }
-
-    result
+    hitboxes
 }
 
-fn process_cluster<'a>(cluster: &mut Vec<EventLayout<'a>>, result: &mut Vec<EventLayout<'a>>) {
+fn flush_cluster_to_hitboxes(
+    cluster: &mut Vec<TempLayout>,
+    results: &mut Vec<EventHitbox>,
+    ctx: &CalendarContext,
+) {
     if cluster.is_empty() {
         return;
     }
 
     let mut max_lane = 0;
 
-    // Assign lanes within the cluster
     for i in 0..cluster.len() {
         let mut lane = 0;
-        // Check all previous events in this cluster for lane collisions
         while cluster[..i].iter().any(|prev| {
             prev.lane == lane
                 && cluster[i].start_secs < prev.end_secs
@@ -640,10 +750,173 @@ fn process_cluster<'a>(cluster: &mut Vec<EventLayout<'a>>, result: &mut Vec<Even
         max_lane = max_lane.max(lane);
     }
 
-    // Set lanes_total to the max lanes needed for the entire cluster
-    let total = max_lane + 1;
-    for mut layout in cluster.drain(..) {
-        layout.lanes_total = total;
-        result.push(layout);
+    let lanes_totel = (max_lane + 1) as f64;
+    let lane_width = (ctx.inner_width - ctx.line_offset) / lanes_totel;
+
+    for i in 0..cluster.len() {
+        let item = &cluster[i];
+
+        let y_start = (item.start_secs / ctx.total_seconds) * ctx.inner_height + ctx.padding_top;
+        let y_end = (item.end_secs / ctx.total_seconds) * ctx.inner_height + ctx.padding_top;
+        let x = ctx.padding + ctx.line_offset + (item.lane as f64 * lane_width);
+        let h = (y_end - y_start).max(18.0);
+
+        let has_neighbor_above = results.iter().any(|prev_hb| {
+            let is_same_lane = (prev_hb.x - x).abs() < 1.0;
+            let touches_top = (prev_hb.y + prev_hb.h - y_start).abs() < 1.5;
+
+            is_same_lane && touches_top
+        });
+
+        results.push(EventHitbox {
+            index: item.index,
+            x,
+            y: y_start,
+            w: lane_width - 3.0,
+            h,
+            has_neighbor_above,
+        })
+    }
+}
+
+#[derive(Debug)]
+pub struct CalendarDataStore {
+    pub timed: Rc<RefCell<Vec<CalDavEvent>>>,
+    pub allday: Rc<RefCell<Vec<CalDavEvent>>>,
+    pub selection: Option<CalendarRule>,
+}
+impl CalendarDataStore {
+    pub fn new(specs: &Rc<WidgetSpec>) -> Self {
+        let selection = if let WidgetSpec::Calendar { selection, .. } = specs.as_ref() {
+            selection.clone()
+        } else {
+            None
+        };
+
+        Self {
+            timed: Rc::new(RefCell::new(Vec::new())),
+            allday: Rc::new(RefCell::new(Vec::new())),
+            selection,
+        }
+    }
+    pub fn load_from_cache(&self) -> Result<(), WatsonError> {
+        let mut path = get_cache_dir()?;
+        path.push("calendar_cache.bin");
+
+        if !path.exists() {
+            return Ok(());
+        }
+
+        let file = fs::File::open(path)
+            .map_err(|e| watson_err!(WatsonErrorKind::FileOpen, e.to_string()))?;
+
+        let reader = BufReader::new(file);
+        let (cached_timed, cached_allday): (Vec<CalDavEvent>, Vec<CalDavEvent>) =
+            bincode::deserialize_from(reader)
+                .map_err(|e| watson_err!(WatsonErrorKind::Deserialize, e.to_string()))?;
+
+        *self.timed.borrow_mut() = cached_timed;
+        *self.allday.borrow_mut() = cached_allday;
+
+        Ok(())
+    }
+    pub fn save_to_cache(&self) -> Result<(), WatsonError> {
+        let mut path = get_cache_dir()?;
+        path.push("calendar_cache.bin");
+
+        let file = fs::File::create(path)
+            .map_err(|e| watson_err!(WatsonErrorKind::FileOpen, e.to_string()))?;
+
+        let writer = BufWriter::new(file);
+        let data = (&*self.timed.borrow(), &*self.allday.borrow());
+        bincode::serialize_into(writer, &data)
+            .map_err(|e| watson_err!(WatsonErrorKind::Serialize, e.to_string()))?;
+
+        Ok(())
+    }
+    pub async fn refresh(&self) {
+        let mut credential_manager = match CredentialManager::new() {
+            Ok(m) => m,
+            Err(e) => {
+                eprintln!("{:?}", e);
+                return;
+            }
+        };
+        if let Err(e) = credential_manager.unlock() {
+            eprintln!("{:?}", e);
+            return;
+        }
+
+        let today = Local::now().date_naive();
+        let mut new_timed = Vec::new();
+        let mut new_allday = Vec::new();
+        let seen_ids: HashSet<String> = {
+            let timed = self.timed.borrow();
+            let allday = self.allday.borrow();
+
+            let mut ids = HashSet::with_capacity(timed.len() + allday.len());
+
+            ids.extend(timed.iter().map(|e| e.uid.clone()));
+            ids.extend(allday.iter().map(|e| e.uid.clone()));
+            ids
+        };
+
+        for account in credential_manager.credentials {
+            let Some(mut provider) = account.provider() else {
+                continue;
+            };
+
+            if let Err(e) = provider.init().await {
+                // TODO: Log err
+                eprintln!("{:?}", e);
+                continue;
+            }
+
+            let calendars = match provider.get_calendars().await {
+                Ok(v) => v,
+                Err(e) => {
+                    // TODO: Log err
+                    eprintln!("{:?}", e);
+                    continue;
+                }
+            };
+
+            let mut events = match provider.get_events(calendars).await {
+                Ok(v) => v,
+                Err(e) => {
+                    // TODO: Log err
+                    eprintln!("{:?}", e);
+                    continue;
+                }
+            };
+
+            // Filter events
+            if let Some(selection) = &self.selection {
+                events.retain(|e| {
+                    selection.is_allowed(&e.calendar_info.name) && e.occurs_on_day(&today)
+                });
+            } else {
+                events.retain(|e| e.occurs_on_day(&today));
+            }
+
+            // Extend the Events
+            {
+                for item in events {
+                    if !seen_ids.contains(&item.uid) {
+                        match item.event_type {
+                            CalEventType::Timed => new_timed.push(item),
+                            CalEventType::AllDay => new_allday.push(item),
+                        }
+                    }
+                }
+            }
+        }
+
+        {
+            self.timed.borrow_mut().extend(new_timed);
+            self.allday.borrow_mut().extend(new_allday);
+        }
+
+        let _ = self.save_to_cache();
     }
 }

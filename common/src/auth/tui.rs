@@ -8,7 +8,7 @@ use crate::{
         credentials::CredentialSecret,
     },
     calendar::google::{client_auth, exchange_code_for_tokens, wait_for_auth_code},
-    errors::WatsonError,
+    utils::errors::WatsonError,
 };
 
 // ---------- TUI ----------

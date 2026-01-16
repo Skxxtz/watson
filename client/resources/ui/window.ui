@@ -1,5 +1,5 @@
 <interface>
-    <template class="MainWindow" parent="GtkApplicationWindow">
+    <template class="MainWindow" parent="GtkWindow">
         <child>
             <object class="GtkScrolledWindow" id="viewport-scroll">
                 <property name="vexpand">true</property>
