@@ -75,6 +75,7 @@ struct CalendarContext {
     window_start: NaiveDateTime,
     window_end: NaiveDateTime,
     hours_to_show: u32,
+    hours_past: u8,
     total_seconds: f64,
 
     hm_format: CalendarHMFormat,
@@ -82,21 +83,10 @@ struct CalendarContext {
     cache: CalendarCache,
 }
 impl CalendarContext {
-    pub fn new(spec: &Rc<WidgetSpec>) -> Self {
-        let default_format = CalendarHMFormat {
-            timeline: "%H:%M".to_string(),
-            event: "H:%M".to_string(),
-        };
-        let CalendarConfig {
-            accent_color,
-            font,
-            hm_format,
-            hours_past,
-            hours_future,
-        } = spec.as_calendar(&default_format);
-
-        // Calculations
-        let hours_to_show = (hours_past + hours_future).clamp(1, 24) as u32;
+    fn new_time_window(
+        hours_to_show: u32,
+        hours_past: u8,
+    ) -> (NaiveDate, NaiveDateTime, NaiveDateTime) {
         let today = Local::now();
         let todate = today.date_naive();
         let now = today.time();
@@ -113,6 +103,25 @@ impl CalendarContext {
         let window_start = todate.and_time(NaiveTime::from_hms_opt(start_hour, 0, 0).unwrap());
         let window_end = window_start + Duration::hours(hours_to_show as i64);
 
+        (todate, window_start, window_end)
+    }
+    pub fn new(spec: &Rc<WidgetSpec>) -> Self {
+        let default_format = CalendarHMFormat {
+            timeline: "%H:%M".to_string(),
+            event: "H:%M".to_string(),
+        };
+        let CalendarConfig {
+            accent_color,
+            font,
+            hm_format,
+            hours_past,
+            hours_future,
+        } = spec.as_calendar(&default_format);
+
+        // Calculations
+        let hours_to_show = (hours_past + hours_future).clamp(1, 24) as u32;
+        let (todate, window_start, window_end) = Self::new_time_window(hours_to_show, hours_past);
+
         Self {
             accent: Rgba::from_str(accent_color).unwrap_or_default(),
             text: Rgba::default(),
@@ -126,6 +135,7 @@ impl CalendarContext {
             window_start,
             window_end,
             hours_to_show,
+            hours_past,
             total_seconds: (window_end - window_start).num_seconds() as f64,
             hm_format: hm_format.clone(),
             cache: CalendarCache::default(),
@@ -145,6 +155,13 @@ impl CalendarContext {
         self.padding_top = if num_events != 0 { 120.0 } else { 100.0 };
         self.inner_width = width - 2.0 * self.padding;
         self.inner_height = height - self.padding - self.padding_top;
+
+        // Date Calulations
+        let (todate, window_start, window_end) =
+            Self::new_time_window(self.hours_to_show, self.hours_past);
+        self.todate = todate;
+        self.window_start = window_start;
+        self.window_end = window_end;
 
         // Measure time label once for offset
         ctx.select_font_face(&self.font, FontSlant::Normal, FontWeight::Bold);
@@ -588,11 +605,11 @@ fn draw_event(
 
     // Text Content
     let summary = &event.title;
-    // let time_str = start_time
-    //     let start_time = context.window_start + chrono::Duration::seconds(start_secs as i64);
-    //     .time()
-    //     .format(&context.hm_format.event)
-    //     .to_string();
+    let time_str = event
+        .start
+        .as_ref()
+        .map(|s| format!("{}", s.local().format(&context.hm_format.event)))
+        .unwrap_or_default();
 
     // Label
     ctx.set_source_rgba(base_color.r, base_color.g, base_color.b, 0.8 * alpha); // Dark text for light background
@@ -609,7 +626,7 @@ fn draw_event(
         // Only draw time if lane is wide enough
         // let _time_extents = ctx.text_extents(&time_str).unwrap();
         if w > 100.0 {
-            // CairoShapesExt::rjust_text(ctx, &time_str, x + w - 8.0, cy, true);
+            CairoShapesExt::rjust_text(ctx, &time_str, x + w - 8.0, cy, true);
         }
 
         // Draw summary with clipping (implicit)
@@ -624,8 +641,8 @@ fn draw_event(
         ctx.select_font_face(&context.font, FontSlant::Normal, FontWeight::Normal);
 
         // Time below title
-        // ctx.move_to(x + padding_x, y + 28.0);
-        // ctx.show_text(&time_str).unwrap();
+        ctx.move_to(x + padding_x, y + 28.0);
+        ctx.show_text(&time_str).unwrap();
 
         // Location at bottom or 3rd line
         if let Some(loc) = &event.location {
