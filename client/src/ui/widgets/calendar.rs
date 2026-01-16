@@ -16,10 +16,13 @@ use std::{
 
 use chrono::{Duration, Local, NaiveDate, NaiveDateTime, NaiveTime, Timelike};
 use gtk4::{
-    Align, Box, DrawingArea, GestureClick, Stack,
+    Align, Box, DrawingArea, EventControllerKey, GestureClick, Stack,
     cairo::{Context, FontSlant, FontWeight},
     glib::{WeakRef, object::ObjectExt},
-    prelude::{BoxExt, DrawingAreaExtManual, GestureSingleExt, WidgetExt, WidgetExtManual},
+    prelude::{
+        BoxExt, DrawingAreaExtManual, EventControllerExt, GestureSingleExt, WidgetExt,
+        WidgetExtManual,
+    },
 };
 
 use crate::ui::widgets::utils::{CairoShapesExt, Rgba};
@@ -197,6 +200,7 @@ impl CalendarBuilder {
                 if let Some(hitbox) = hit {
                     if let Some(event) = events_borrow.get(hitbox.index) {
                         stack.set_visible_child_name("details");
+                        details.grab_focus();
                         details.set_event(event);
                     }
                 }
@@ -217,6 +221,22 @@ impl CalendarBuilder {
             }
         });
         details.add_controller(click);
+
+        let controller = EventControllerKey::new();
+        controller.set_propagation_phase(gtk4::PropagationPhase::Capture);
+        controller.connect_key_pressed({
+            let stack = stack.downgrade();
+            move |_gesture, key, _keycode, _state| {
+                if key == gtk4::gdk::Key::Escape {
+                    if let Some(stack) = stack.upgrade() {
+                        stack.set_visible_child_name("calendar");
+                        return gtk4::glib::Propagation::Stop;
+                    }
+                }
+                gtk4::glib::Propagation::Proceed
+            }
+        });
+        details.add_controller(controller);
     }
     pub fn for_spec(mut self, specs: &WidgetSpec) -> Self {
         let state = Rc::new(AnimationState::new());

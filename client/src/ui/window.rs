@@ -1,7 +1,7 @@
 use gtk4::{
-    EventControllerKey,
+    EventControllerKey, PropagationPhase,
     glib::object::ObjectExt,
-    prelude::{GtkWindowExt, WidgetExt},
+    prelude::{EventControllerExt, GtkWindowExt, WidgetExt},
 };
 use gtk4_layer_shell::LayerShell;
 
@@ -17,8 +17,10 @@ impl WatsonUi {
         win.set_anchor(gtk4_layer_shell::Edge::Right, true);
         win.set_anchor(gtk4_layer_shell::Edge::Bottom, true);
         win.set_keyboard_mode(gtk4_layer_shell::KeyboardMode::Exclusive);
+        win.set_exclusive_zone(0);
 
         let controller = EventControllerKey::new();
+        controller.set_propagation_phase(PropagationPhase::Bubble);
         controller.connect_key_pressed({
             let win = win.downgrade();
             move |_gesture, key, _keycode, _state| {

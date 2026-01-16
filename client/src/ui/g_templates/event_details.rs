@@ -75,6 +75,11 @@ impl EventDetails {
         let obj: Self = Object::new();
         obj.set_vexpand(true);
         obj.set_hexpand(true);
+        obj.set_can_focus(true);
+        obj.set_focusable(true);
+        obj.set_focus_on_click(true);
+        obj.set_can_target(true);
+
         obj.set_css_classes(&["inner-widget", "calendar-details"]);
         obj
     }
