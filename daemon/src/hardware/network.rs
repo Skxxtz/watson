@@ -1,4 +1,4 @@
-use std::{collections::HashMap, time::Instant};
+use std::collections::HashMap;
 
 use common::{
     utils::errors::{WatsonError, WatsonErrorKind},
