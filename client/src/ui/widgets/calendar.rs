@@ -81,6 +81,7 @@ struct CalendarContext {
     hm_format: CalendarHMFormat,
 
     cache: CalendarCache,
+    needs_init: bool,
 }
 impl CalendarContext {
     fn new_time_window(
@@ -139,16 +140,10 @@ impl CalendarContext {
             total_seconds: (window_end - window_start).num_seconds() as f64,
             hm_format: hm_format.clone(),
             cache: CalendarCache::default(),
+            needs_init: true,
         }
     }
-    fn update(
-        &mut self,
-        area: &DrawingArea,
-        ctx: &Context,
-        width: f64,
-        height: f64,
-        num_events: usize,
-    ) {
+    fn update(&mut self, area: &DrawingArea, width: f64, height: f64, num_events: usize) {
         self.text = area.color().into();
 
         self.padding = (width as f64 * 0.05).min(20.0);
@@ -162,12 +157,7 @@ impl CalendarContext {
         self.todate = todate;
         self.window_start = window_start;
         self.window_end = window_end;
-
-        // Measure time label once for offset
-        ctx.select_font_face(&self.font, FontSlant::Normal, FontWeight::Bold);
-        ctx.set_font_size(12.0);
-        let ext = ctx.text_extents("00:00").unwrap();
-        self.line_offset = ext.width() + 10.0;
+        self.needs_init = false;
     }
     fn is_dirty(&self, width: f64, height: f64) -> bool {
         self.cache.hitboxes.is_empty()
@@ -315,17 +305,19 @@ impl CalendarBuilder {
             let context = Rc::clone(&context);
             move |area, ctx, width, height| {
                 let mut context = context.borrow_mut();
-                let w = width as f64;
-                let h = height as f64;
 
-                {
+                // Measure time label once for offset
+                ctx.select_font_face(&context.font, FontSlant::Normal, FontWeight::Bold);
+                ctx.set_font_size(12.0);
+                let ext = ctx.text_extents("00:00").unwrap();
+                context.line_offset = ext.width() + 10.0;
+
+                if context.needs_init {
                     let events_timed = data_store.timed.borrow();
-                    context.update(area, ctx, w, h, events_timed.len());
-
-                    if context.is_dirty(w, h) {
-                        context.cache.hitboxes = compute_event_hitboxes(&*events_timed, &context);
-                        context.cache.last_window_start = context.window_start;
-                    }
+                    context.update(area, width as f64, height as f64, events_timed.len());
+                    context.cache.hitboxes = compute_event_hitboxes(&*events_timed, &context);
+                    context.cache.last_window_start = context.window_start;
+                    area.queue_draw();
                 }
 
                 Calendar::draw(
@@ -347,13 +339,36 @@ impl CalendarBuilder {
         );
 
         // Minute interval redraw
-        gtk4::glib::timeout_add_seconds_local(60, {
+        gtk4::glib::spawn_future_local({
             let calendar_ref = calendar_area.downgrade();
-            move || {
-                if let Some(cal) = calendar_ref.upgrade() {
-                    cal.queue_draw();
+            let context = Rc::clone(&context);
+            let data_store = Rc::clone(&data_store);
+            async move {
+                loop {
+                    let now = chrono::Local::now();
+                    let seconds_until_next_hour = ((59 - now.minute()) * 60) + (60 - now.second());
+                    tokio::time::sleep(std::time::Duration::from_secs(
+                        seconds_until_next_hour as u64,
+                    ))
+                    .await;
+
+                    if let Some(area) = calendar_ref.upgrade() {
+                        let mut context = context.borrow_mut();
+                        let events_timed = data_store.timed.borrow();
+                        let w = area.width() as f64;
+                        let h = area.height() as f64;
+                        context.update(&area, w, h, events_timed.len());
+
+                        if context.is_dirty(w, h) {
+                            context.cache.hitboxes =
+                                compute_event_hitboxes(&*events_timed, &context);
+                            context.cache.last_window_start = context.window_start;
+                            area.queue_draw();
+                        }
+                    } else {
+                        break;
+                    }
                 }
-                gtk4::glib::ControlFlow::Continue
             }
         });
 
@@ -612,7 +627,7 @@ fn draw_event(
         .unwrap_or_default();
 
     // Label
-    ctx.set_source_rgba(base_color.r, base_color.g, base_color.b, 0.8 * alpha); // Dark text for light background
+    ctx.set_source_rgba(base_color.r, base_color.g, base_color.b, 0.8 * alpha);
     ctx.select_font_face(&context.font, FontSlant::Normal, FontWeight::Bold);
 
     let is_tiny_event = h < 30.0;
