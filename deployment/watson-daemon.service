@@ -1,0 +1,11 @@
+[Unit]
+Description=Watson Daemon
+X-Restart-Triggers=~/.config/watson/config.toml
+
+[Service]
+ExecStart=/usr/local/bin/watson-daemon
+Restart=on-failure
+RestartSec=5s
+
+[Install]
+WantedBy=graphical-session.target
