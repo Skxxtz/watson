@@ -101,28 +101,29 @@ async fn main() -> Result<(), WatsonError> {
                 tokio::select! {
                     biased;
                     _ = notify.notified() => {
-                        let mask = state.borrow().system_state.updated.swap(0, std::sync::atomic::Ordering::Relaxed);
+                        let state_ref = state.borrow();
+                        let mask = state_ref.system_state.updated.swap(0, std::sync::atomic::Ordering::Relaxed);
                         if mask & (1 << UpdateField::Init as u8) != 0 {
                             ui_ready.notify_one();
                         }
                         if mask & (1 << UpdateField::Wifi as u8) != 0 {
-                            state.borrow().button(BackendFunc::Wifi).for_each(|c| c.queue_draw());
+                            state_ref.button(BackendFunc::Wifi).for_each(|c| c.queue_draw());
                         }
 
                         if mask & (1 << UpdateField::Bluetooth as u8) != 0 {
-                            state.borrow().button(BackendFunc::Bluetooth).for_each(|c| c.queue_draw());
+                            state_ref.button(BackendFunc::Bluetooth).for_each(|c| c.queue_draw());
                         }
 
                         if mask & (1 << UpdateField::Powermode as u8) != 0 {
-                            state.borrow().button(BackendFunc::Powermode).for_each(|c| c.queue_draw());
+                            state_ref.button(BackendFunc::Powermode).for_each(|c| c.queue_draw());
                         }
 
                         if mask & (1 << UpdateField::Brightness as u8) != 0 {
-                            state.borrow().slider(BackendFunc::Brightness).for_each(|c| c.queue_draw());
+                            state_ref.slider(BackendFunc::Brightness).for_each(|c| c.queue_draw());
                         }
 
                         if mask & (1 << UpdateField::Volume as u8) != 0 {
-                            state.borrow().slider(BackendFunc::Volume).for_each(|c| c.queue_draw());
+                            state_ref.slider(BackendFunc::Volume).for_each(|c| c.queue_draw());
                         }
                     }
                     Ok(msg) = rx.recv() => {
@@ -185,6 +186,7 @@ async fn main() -> Result<(), WatsonError> {
         }
     });
 
+    win.present();
     gtk4::glib::spawn_future_local({
         let state = Rc::clone(&state);
         let win = win.downgrade();
@@ -196,7 +198,6 @@ async fn main() -> Result<(), WatsonError> {
                 for spec in config {
                     create_widgets(&imp.viewport.get(), spec, Rc::clone(&state), false);
                 }
-                win.present();
             }
         }
     });

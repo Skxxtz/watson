@@ -4,11 +4,11 @@ mod imp {
 
     use gtk4::subclass::prelude::*;
     use gtk4::{Box as GtkBox, Window};
-    use gtk4::{ScrolledWindow, glib};
+    use gtk4::{CompositeTemplate, ScrolledWindow, glib};
 
     use crate::WatsonState;
 
-    #[derive(gtk4::CompositeTemplate, Default)]
+    #[derive(CompositeTemplate, Default)]
     #[template(resource = "/dev/skxxtz/watson/ui/window.ui")]
     pub struct MainWindow {
         #[template_child(id = "viewport")]
@@ -40,15 +40,13 @@ mod imp {
     impl WindowImpl for MainWindow {}
 }
 
-use gtk4::gio::{ActionGroup, ActionMap};
 use gtk4::glib::Object;
 use gtk4::prelude::*;
 
 gtk4::glib::wrapper! {
     pub struct MainWindow(ObjectSubclass<imp::MainWindow>)
-        @extends gtk4::Window, gtk4::Widget,
-                 gtk4::Accessible, gtk4::Buildable, gtk4::ConstraintTarget,
-                 ActionMap, ActionGroup, gtk4::Native, gtk4::Root, gtk4::ShortcutManager;
+        @extends gtk4::Widget, gtk4::Window,
+        @implements gtk4::Buildable, gtk4::Native, gtk4::Accessible, gtk4::ConstraintTarget, gtk4::ShortcutManager, gtk4::Root;
 }
 
 impl MainWindow {
