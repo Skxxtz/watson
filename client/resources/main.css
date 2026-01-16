@@ -175,11 +175,14 @@ scrolledwindow undershoot.bottom {
     color: var(--text-20);
 }
 
+.button.powermode image {
+    -gtk-icon-size: 24px;
+}
 .button.powermode.state-0 .button-obj {
     color: var(--green);
 }
 .button.powermode.state-0 image {
-    color: var(--background);
+    color: var(--text-100);
 }
 .button.powermode.state-1 .button-obj {
     color: var(--text-20);
@@ -191,7 +194,7 @@ scrolledwindow undershoot.bottom {
     color: var(--orange);
 }
 .button.powermode.state-2 image {
-    color: var(--background);
+    color: var(--text-100);
 }
 
 

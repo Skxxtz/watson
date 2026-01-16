@@ -450,21 +450,30 @@ impl BackendFunc {
     pub fn build(self) -> Box<dyn WidgetBehavior> {
         match self {
             Self::Wifi => Box::new(ToggleButton {
-                icon: "network-wireless-signal-excellent-symbolic",
+                icons: [
+                    "network-wireless-disabled-symbolic",
+                    "network-wireless-signal-excellent-symbolic",
+                ],
                 getter: |s| s.wifi.load(Ordering::Relaxed),
                 setter: |s, v| s.wifi.store(v, Ordering::Relaxed),
                 request_builder: |v| Request::SetWifi(v),
                 func: self,
             }),
             Self::Bluetooth => Box::new(ToggleButton {
-                icon: "bluetooth-symbolic",
+                icons: [
+                    "bluetooth-disabled-symbolic",
+                    "bluetooth-symbolic",
+                ],
                 getter: |s| s.bluetooth.load(Ordering::Relaxed),
                 setter: |s, v| s.bluetooth.store(v, Ordering::Relaxed),
                 request_builder: |v| Request::SetBluetooth(v),
                 func: self,
             }),
             Self::Dnd => Box::new(ToggleButton {
-                icon: "weather-clear-night-symbolic",
+                icons: [
+                    "weather-clear-night-symbolic",
+                    "weather-clear-night-symbolic",
+                ],
                 getter: |s| s.dnd.load(Ordering::Relaxed),
                 setter: |s, v| s.dnd.store(v, Ordering::Relaxed),
                 request_builder: |_v| Request::Ping,
@@ -472,9 +481,9 @@ impl BackendFunc {
             }),
             Self::Powermode => Box::new(CycleButton {
                 icons: &[
-                    "power-profile-power-saver-symbolic",
-                    "power-profile-balanced-symbolic",
-                    "power-profile-performance-symbolic",
+                    "battery-profile-powersave-symbolic",
+                    "battery-ac-adapter-symbolic",
+                    "battery-profile-performance-symbolic",
                 ],
                 max_states: 3,
                 field: |s| &s.powermode,
@@ -505,7 +514,7 @@ impl BackendFunc {
             }),
 
             Self::None => Box::new(ToggleButton {
-                icon: "",
+                icons: ["", ""],
                 getter: |_| false,
                 setter: |_, _| {},
                 request_builder: |_| Request::Ping,

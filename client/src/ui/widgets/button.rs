@@ -105,7 +105,7 @@ impl ButtonBuilder {
             }
         });
 
-        Button::connect_clicked(&overlay, &func, system_state);
+        Button::connect_clicked(&overlay, &svg_icon, &func, system_state);
 
         Self {
             area,
@@ -136,6 +136,7 @@ impl Button {
 
     fn connect_clicked(
         target: &Overlay,
+        icon: &Image,
         func: &Box<dyn WidgetBehavior>,
         system_state: Arc<AtomicSystemState>,
     ) {
@@ -143,22 +144,30 @@ impl Button {
         let times = std::cell::Cell::new(func.get_percentage(&system_state));
         click.connect_pressed({
             let target = target.downgrade();
+            let icon = icon.downgrade();
             let state = Arc::clone(&system_state);
             let func = func.clone();
             move |_gesture, _, _, _| {
                 let new_state = func.execute(&state);
                 times.set(times.get() ^ 1);
                 if let Some(target) = target.upgrade() {
-                    let state_class = target
-                        .css_classes()
-                        .iter()
-                        .find(|s| s.starts_with("state-"))
-                        .map(|v| v.to_string());
-                    if let Some(class) = state_class {
-                        target.remove_css_class(&class);
-                    }
-                    if let Some(class) = new_state {
-                        target.add_css_class(&format!("state-{class}"));
+                    if let Some(new_state) = new_state {
+                        let state_class = target
+                            .css_classes()
+                            .iter()
+                            .find(|s| s.starts_with("state-"))
+                            .map(|v| v.to_string());
+                        if let Some(class) = state_class {
+                            target.remove_css_class(&class);
+                        }
+
+                        target.add_css_class(&format!("state-{new_state}"));
+
+                        // efficient icon replace logic
+                        let new_icon = func.icon_name(new_state);
+                        if let Some(icon_widget) = icon.upgrade() {
+                            icon_widget.set_icon_name(Some(new_icon));
+                        }
                     }
                 }
             }

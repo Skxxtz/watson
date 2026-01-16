@@ -20,7 +20,7 @@ pub trait WidgetBehavior {
 
 #[derive(Clone)]
 pub struct ToggleButton {
-    pub icon: &'static str,
+    pub icons: [&'static str; 2],
     // A closure that defines how to get/set the value
     pub getter: fn(&AtomicSystemState) -> bool,
     pub setter: fn(&AtomicSystemState, bool),
@@ -38,8 +38,9 @@ impl WidgetBehavior for ToggleButton {
     fn set_percentage(&self, state: &AtomicSystemState, value: u8) {
         (self.setter)(state, value != 0);
     }
-    fn icon_name(&self, _val: u8) -> &'static str {
-        self.icon
+    fn icon_name(&self, val: u8) -> &'static str {
+        let idx = val.clamp(0, 1);
+        self.icons[idx as usize]
     }
     fn as_request(&self, state: &AtomicSystemState) -> Option<(u8, Request)> {
         let new_state = !(self.getter)(state);
