@@ -47,6 +47,7 @@ pub enum WatsonErrorKind {
     InvalidData,
 
     IO,
+    TaskJoin,
 
     FileOpen,
     FileCreate,
