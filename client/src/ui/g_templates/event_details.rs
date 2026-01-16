@@ -106,7 +106,7 @@ impl EventDetails {
 
         // 4. Recurrence
         if let Some(rule) = &event.recurrence {
-            imp.recurrence_label.set_label("Repeats");
+            imp.recurrence_label.set_label(&rule.format_str());
             imp.recurrence_label.set_visible(true);
             imp.recurrence_icon.set_visible(true);
         } else {

@@ -76,9 +76,9 @@ impl TryFrom<ical::property::Property> for DateTimeSpec {
 
             let naive = NaiveDateTime::parse_from_str(inner, "%Y%m%dT%H%M%S")
                 .map_err(|e| watson_err!(
-                    WatsonErrorKind::DateParse,
-                    "Failed to parse NaiveDateTime from `{inner}` using `%Y%m%dT%H%M%S` format. Error: {}",
-                    e.to_string()
+                        WatsonErrorKind::DateParse,
+                        "Failed to parse NaiveDateTime from `{inner}` using `%Y%m%dT%H%M%S` format. Error: {}",
+                        e.to_string()
                 ))?;
 
             let dt_utc = if is_utc {
@@ -175,5 +175,79 @@ pub struct RecurrenceRule {
 impl RecurrenceRule {
     pub fn new(raw: String) -> Self {
         Self { raw }
+    }
+    pub fn format_str(&self) -> String {
+        let mut freq = "";
+        let mut interval = 1;
+        let mut byday = "";
+
+        // Parse RRULE parts
+        for part in self.raw.trim_start_matches("RRULE:").split(';') {
+            let mut kv = part.splitn(2, '=');
+            match (kv.next(), kv.next()) {
+                (Some("FREQ"), Some(val)) => freq = val,
+                (Some("INTERVAL"), Some(val)) => interval = val.parse::<u32>().unwrap_or(1),
+                (Some("BYDAY"), Some(val)) => byday = val,
+                _ => {}
+            }
+        }
+
+        // Handle the "Days" string first
+        let days_list = if !byday.is_empty() {
+            let mapped = byday
+                .split(',')
+                .map(|d| match d {
+                    "MO" => "Mon",
+                    "TU" => "Tue",
+                    "WE" => "Wed",
+                    "TH" => "Thu",
+                    "FR" => "Fri",
+                    "SA" => "Sat",
+                    "SU" => "Sun",
+                    _ => d,
+                })
+                .collect::<Vec<_>>()
+                .join(", ");
+
+            match mapped.as_str() {
+                "Mon, Tue, Wed, Thu, Fri" => Some("weekdays".to_string()),
+                "Sat, Sun" => Some("weekends".to_string()),
+                _ => Some(mapped),
+            }
+        } else {
+            None
+        };
+
+        // Determine the base frequency string
+        match (freq, interval, &days_list) {
+            ("DAILY", 1, _) => "Daily".into(),
+            ("WEEKLY", 1, None) => "Weekly".into(),
+            ("WEEKLY", 1, Some(d)) if d == "weekdays" => "Every weekday".into(),
+            ("WEEKLY", 1, Some(d)) if d == "weekends" => "Every weekend".into(),
+            ("MONTHLY", 1, _) => "Monthly".into(),
+            ("YEARLY", 1, _) => "Yearly".into(),
+
+            // Custom Intervals
+            (f, i, d) => {
+                let unit = match f {
+                    "DAILY" => "day",
+                    "WEEKLY" => "week",
+                    "MONTHLY" => "month",
+                    "YEARLY" => "year",
+                    _ => "period",
+                };
+
+                let mut s = if i > 1 {
+                    format!("Every {} {}s", i, unit)
+                } else {
+                    format!("Every {}", unit)
+                };
+
+                if let Some(days) = d {
+                    s.push_str(&format!(" on {}", days));
+                }
+                s
+            }
+        }
     }
 }
