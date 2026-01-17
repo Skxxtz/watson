@@ -1,3 +1,5 @@
+use dashmap::DashMap;
+use serde::{Deserialize, Serialize};
 use std::{
     cell::Cell,
     io::{Read, Write},
@@ -5,8 +7,6 @@ use std::{
     os::unix::net::UnixStream,
     sync::atomic::{AtomicBool, AtomicU8, Ordering},
 };
-
-use serde::{Deserialize, Serialize};
 use strum::{AsRefStr, EnumIter};
 use zbus::zvariant::OwnedValue;
 
@@ -79,6 +79,7 @@ pub struct AtomicSystemState {
     pub powermode: AtomicU8,
     pub brightness: AtomicU8,
     pub volume: AtomicU8,
+    pub dynamic_states: DashMap<&'static str, AtomicU8>,
 }
 
 #[repr(u8)]
@@ -149,6 +150,7 @@ pub enum Response {
     Ok,
     Error(String),
     Pong,
+    Todo,
     Status {
         running: bool,
         silent: bool,
@@ -200,6 +202,7 @@ pub enum Request {
     SetPowerMode(u8),
     SetBacklight(u8),
     SetVolume(u8),
+    Command(String),
 }
 
 #[derive(Deserialize, Serialize, Debug, Copy, Clone, PartialEq, Eq, Default)]

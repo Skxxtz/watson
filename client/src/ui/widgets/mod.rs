@@ -2,7 +2,6 @@ mod battery;
 mod button;
 pub mod calendar;
 mod clock;
-mod interactives;
 mod notifications;
 mod slider;
 mod utils;
@@ -13,7 +12,7 @@ pub use battery::{Battery, BatteryBuilder};
 pub use button::{Button, ButtonBuilder};
 pub use calendar::Calendar;
 pub use clock::{Clock, HandStyle};
-pub use utils::BackendFunc;
+pub use utils::backend_functions::*;
 
 use gtk4::{
     Align, AspectFrame, Box, DrawingArea, Separator,
@@ -33,7 +32,7 @@ pub fn create_widgets(
 ) {
     match spec {
         WidgetSpec::Battery { .. } => {
-            let bat = BatteryBuilder::new(&spec, in_holder)
+            let bat = BatteryBuilder::new(spec, in_holder)
                 .for_box(&viewport)
                 .build();
 
@@ -44,14 +43,13 @@ pub fn create_widgets(
                 .for_spec(&spec)
                 .for_box(&viewport)
                 .build();
-
             state
                 .borrow_mut()
                 .widgets
                 .push(WatsonWidget::Calendar(calendar));
         }
         WidgetSpec::Clock { .. } => {
-            let clock = Clock::new(&spec);
+            let clock = Clock::new(spec);
 
             state
                 .borrow_mut()
@@ -72,7 +70,7 @@ pub fn create_widgets(
         }
         WidgetSpec::Button { .. } => {
             let button = {
-                ButtonBuilder::new(&spec, Arc::clone(&state.borrow().system_state), in_holder)
+                ButtonBuilder::new(spec, Arc::clone(&state.borrow().system_state), in_holder)
                     .for_box(&viewport)
                     .build()
             };
@@ -83,7 +81,7 @@ pub fn create_widgets(
         }
         WidgetSpec::Slider { .. } => {
             let slider = {
-                SliderBuilder::new(&spec, Arc::clone(&state.borrow().system_state), in_holder)
+                SliderBuilder::new(spec, Arc::clone(&state.borrow().system_state), in_holder)
                     .for_box(&viewport)
                     .build()
             };

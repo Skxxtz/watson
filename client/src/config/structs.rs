@@ -5,6 +5,7 @@ use common::utils::errors::{WatsonError, WatsonErrorKind};
 use common::watson_err;
 use serde::{Deserialize, Serialize};
 
+use crate::ui::widgets::BackendFuncType;
 use crate::ui::widgets::{
     BackendFunc, HandStyle, SliderRange,
     calendar::types::{CalendarConfig, CalendarHMFormat, CalendarRule},
@@ -41,7 +42,7 @@ impl From<AlignmentWrapper> for gtk4::Align {
     }
 }
 
-#[derive(Debug, Clone, Deserialize, Serialize)]
+#[derive(Debug, Deserialize, Serialize)]
 #[serde(tag = "type", rename_all = "lowercase")]
 pub enum WidgetSpec {
     Battery {
@@ -123,9 +124,6 @@ pub enum WidgetSpec {
         func: BackendFunc,
 
         #[serde(default)]
-        icon: Option<String>,
-
-        #[serde(default)]
         range: SliderRange,
 
         #[serde(default)]
@@ -190,11 +188,11 @@ impl WidgetSpec {
             {
                 Self::Battery { .. } => 1 << 0,
                 Self::Slider { func, ..} => {
-                    match func {
-                        BackendFunc::Brightness => {
+                    match BackendFuncType::from(func) {
+                        BackendFuncType::Brightness => {
                             0
                         },
-                        BackendFunc::Volume => {
+                        BackendFuncType::Volume => {
                             1 << 1
                         }
                         _ => 0
@@ -245,31 +243,22 @@ impl WidgetSpec {
             },
         }
     }
-    pub fn as_button(&self) -> Option<(&WidgetBase, &BackendFunc, Option<String>)> {
+    pub fn as_button(self) -> Option<(WidgetBase, BackendFunc, Option<String>)> {
         if let Self::Button { base, func, icon } = self {
-            Some((base, func, icon.clone()))
+            Some((base, func, icon))
         } else {
             None
         }
     }
-    pub fn as_slider(
-        &self,
-    ) -> Option<(
-        &WidgetBase,
-        &BackendFunc,
-        Option<String>,
-        &SliderRange,
-        &WidgetOrientation,
-    )> {
+    pub fn as_slider(self) -> Option<(WidgetBase, BackendFunc, SliderRange, WidgetOrientation)> {
         if let Self::Slider {
             base,
             func,
-            icon,
             range,
             orientation,
         } = self
         {
-            Some((base, func, icon.clone(), range, orientation))
+            Some((base, func, range, orientation))
         } else {
             None
         }
@@ -312,8 +301,9 @@ fn default_battery_threshold() -> u8 {
     40
 }
 
-#[derive(Debug, Clone, Copy, Deserialize, Serialize, Default, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, Deserialize, Serialize, Default, PartialEq, Eq, strum::Display)]
 #[serde(rename_all = "lowercase")]
+#[strum(serialize_all = "lowercase")]
 pub enum WidgetOrientation {
     #[default]
     Vertical,

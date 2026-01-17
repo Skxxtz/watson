@@ -304,6 +304,7 @@ impl RequestHandler for Request {
                 Ok(state) => Response::SystemState(state),
                 Err(e) => Response::Error(e.message),
             },
+            Request::Command(_) => Response::Todo,
         }
     }
 }

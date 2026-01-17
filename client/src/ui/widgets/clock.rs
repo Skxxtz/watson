@@ -1,8 +1,8 @@
-use std::{f64::consts::PI, fs, rc::Rc, str::FromStr};
+use std::{f64::consts::PI, fs, str::FromStr};
 
 use crate::{
     config::WidgetSpec,
-    ui::widgets::utils::{CairoShapesExt, Rgba},
+    ui::widgets::utils::render::{CairoShapesExt, Rgba},
 };
 use chrono::{DateTime, Local, Timelike};
 use chrono_tz::Tz;
@@ -14,10 +14,38 @@ use gtk4::{
 };
 use serde::{Deserialize, Serialize};
 
+#[derive(Default)]
+pub struct ClockConfig {
+    time_zone: Option<String>,
+    hand_style: HandStyle,
+    accent_color: String,
+    font: String,
+}
+impl From<&WidgetSpec> for ClockConfig {
+    fn from(value: &WidgetSpec) -> Self {
+        if let WidgetSpec::Clock {
+            time_zone,
+            hand_style,
+            accent_color,
+            font,
+            ..
+        } = value
+        {
+            Self {
+                time_zone: time_zone.clone(),
+                hand_style: hand_style.clone(),
+                accent_color: accent_color.clone(),
+                font: font.clone(),
+            }
+        } else {
+            Default::default()
+        }
+    }
+}
 pub struct Clock;
 impl Clock {
-    pub fn new(specs: &WidgetSpec) -> DrawingArea {
-        let specs = Rc::new(specs.clone());
+    pub fn new(specs: WidgetSpec) -> DrawingArea {
+        let config = ClockConfig::from(&specs);
         let base = specs.base();
 
         let clock_area = DrawingArea::builder()
@@ -38,9 +66,9 @@ impl Clock {
         clock_area.set_size_request(200, 200);
 
         clock_area.set_draw_func({
-            let specs = Rc::clone(&specs);
+            let config = config;
             move |area, ctx, width, height| {
-                Clock::draw(area, ctx, width, height, &specs);
+                Clock::draw(area, ctx, width, height, &config);
             }
         });
 
@@ -55,17 +83,13 @@ impl Clock {
 
         clock_area
     }
-    pub fn draw(_area: &DrawingArea, ctx: &Context, width: i32, height: i32, specs: &WidgetSpec) {
-        let WidgetSpec::Clock {
-            base: _,
+    pub fn draw(_area: &DrawingArea, ctx: &Context, width: i32, height: i32, config: &ClockConfig) {
+        let ClockConfig {
             time_zone,
             hand_style: head_style,
             accent_color,
             font,
-        } = specs
-        else {
-            return;
-        };
+        } = config;
 
         let tz: Tz = match time_zone {
             Some(tz_str) => tz_str.parse::<Tz>().unwrap_or(Tz::UTC),
@@ -103,7 +127,7 @@ impl Clock {
         };
 
         ctx.select_font_face(
-            font,
+            &font,
             gtk4::cairo::FontSlant::Normal,
             gtk4::cairo::FontWeight::Bold,
         );
@@ -163,7 +187,7 @@ impl Clock {
 
         // Draw Zimezone
         ctx.select_font_face(
-            font,
+            &font,
             gtk4::cairo::FontSlant::Normal,
             gtk4::cairo::FontWeight::Normal,
         );
@@ -185,7 +209,7 @@ impl Clock {
 
         // Draw Second Hand
         HandStyle::Modern {
-            color: accent_color.into(),
+            color: accent_color.clone(),
             width: 6.0,
         }
         .second_head(&ctx, &clock);

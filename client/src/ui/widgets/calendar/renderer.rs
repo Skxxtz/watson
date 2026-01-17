@@ -6,7 +6,7 @@ use gtk4::cairo::{Context, FontSlant, FontWeight};
 
 use crate::ui::widgets::{
     calendar::{CalendarContext, EventHitbox, data_store::CalendarDataStore},
-    utils::{CairoShapesExt, Rgba},
+    utils::render::{CairoShapesExt, Rgba},
 };
 
 pub struct CalendarRenderer<'c> {

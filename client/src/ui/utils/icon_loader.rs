@@ -1,14 +1,17 @@
-use crate::{ICONS};
+use super::Loader;
+use crate::ICONS;
 use common::utils::errors::{WatsonError, WatsonErrorKind};
 use common::utils::paths::home_dir;
 use common::watson_err;
-use gtk4::{gdk::Display, IconTheme};
+use gtk4::{IconTheme, gdk::Display};
 use std::collections::HashMap;
 use std::env;
 use std::path::{Path, PathBuf};
 use std::sync::{RwLock, RwLockReadGuard, RwLockWriteGuard};
-use super::Loader;
 
+// TODO!
+
+#[allow(dead_code)]
 impl Loader {
     pub async fn load_icon_theme() -> Option<WatsonError> {
         let icon_theme = IconTheme::for_display(Display::default().as_ref().unwrap());
@@ -28,6 +31,7 @@ impl Loader {
 pub struct CustomIconTheme {
     pub buf: HashMap<String, PathBuf>,
 }
+#[allow(dead_code)]
 impl CustomIconTheme {
     pub fn new() -> Self {
         Self {
@@ -81,6 +85,7 @@ impl CustomIconTheme {
 }
 
 pub struct IconThemeGuard;
+#[allow(dead_code)]
 impl<'g> IconThemeGuard {
     fn get_theme() -> Result<&'g RwLock<CustomIconTheme>, WatsonError> {
         ICONS.get().ok_or_else(|| {
@@ -133,4 +138,3 @@ impl<'g> IconThemeGuard {
         Ok(())
     }
 }
-

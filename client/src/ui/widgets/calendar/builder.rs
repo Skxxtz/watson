@@ -18,7 +18,7 @@ use crate::{
                 CalendarContext, CalendarRenderer, cache::CalendarCache,
                 data_store::CalendarDataStore,
             },
-            utils::{AnimationDirection, AnimationState, EaseFunction},
+            utils::animation::{AnimationDirection, AnimationState, EaseFunction},
         },
     },
 };

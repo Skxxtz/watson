@@ -16,7 +16,7 @@ impl WatsonUi {
         win.set_anchor(gtk4_layer_shell::Edge::Top, true);
         win.set_anchor(gtk4_layer_shell::Edge::Right, true);
         win.set_anchor(gtk4_layer_shell::Edge::Bottom, true);
-        win.set_keyboard_mode(gtk4_layer_shell::KeyboardMode::Exclusive);
+        win.set_keyboard_mode(gtk4_layer_shell::KeyboardMode::OnDemand);
         win.set_exclusive_zone(0);
 
         let controller = EventControllerKey::new();

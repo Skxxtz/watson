@@ -1,17 +1,19 @@
+use once_cell::sync::OnceCell;
 use std::{
-    cell::{RefCell},
+    cell::RefCell,
     collections::HashMap,
     env,
     rc::Rc,
     sync::{Arc, OnceLock, RwLock},
 };
-use once_cell::sync::OnceCell;
 
 use crate::{
     config::{WidgetSpec, load_config},
     connection::ClientConnection,
     ui::{
-        WatsonUi, utils::icon_loader::{CustomIconTheme, IconThemeGuard}, widgets::{BackendFunc, Battery, NotificationCentre, WatsonWidget, create_widgets}
+        WatsonUi,
+        utils::icon_loader::{CustomIconTheme, IconThemeGuard},
+        widgets::{BackendFuncType, Battery, NotificationCentre, WatsonWidget, create_widgets},
     },
 };
 use common::{
@@ -26,9 +28,7 @@ use gtk4::{
     glib::{WeakRef, object::ObjectExt, subclass::types::ObjectSubclassIsExt},
     prelude::{GtkWindowExt, WidgetExt},
 };
-use tokio::{
-    sync::{Notify, broadcast, mpsc::UnboundedSender},
-};
+use tokio::sync::{Notify, broadcast, mpsc::UnboundedSender};
 
 mod config;
 mod connection;
@@ -107,23 +107,23 @@ async fn main() -> Result<(), WatsonError> {
                             ui_ready.notify_one();
                         }
                         if mask & (1 << UpdateField::Wifi as u8) != 0 {
-                            state_ref.notify_update(BackendFunc::Wifi);
+                            state_ref.notify_update(BackendFuncType::Wifi);
                         }
 
                         if mask & (1 << UpdateField::Bluetooth as u8) != 0 {
-                            state_ref.notify_update(BackendFunc::Bluetooth);
+                            state_ref.notify_update(BackendFuncType::Bluetooth);
                         }
 
                         if mask & (1 << UpdateField::Powermode as u8) != 0 {
-                            state_ref.notify_update(BackendFunc::Powermode);
+                            state_ref.notify_update(BackendFuncType::Powermode);
                         }
 
                         if mask & (1 << UpdateField::Brightness as u8) != 0 {
-                            state_ref.notify_update(BackendFunc::Brightness);
+                            state_ref.notify_update(BackendFuncType::Brightness);
                         }
 
                         if mask & (1 << UpdateField::Volume as u8) != 0 {
-                            state_ref.notify_update(BackendFunc::Volume);
+                            state_ref.notify_update(BackendFuncType::Volume);
                         }
                     }
                     Ok(msg) = rx.recv() => {
@@ -208,7 +208,7 @@ pub struct WatsonState {
     system_state: Arc<AtomicSystemState>,
 
     widgets: Vec<WatsonWidget>,
-    subscribers: HashMap<BackendFunc, Vec<WeakRef<gtk4::Widget>>>,
+    subscribers: HashMap<BackendFuncType, Vec<WeakRef<gtk4::Widget>>>,
 }
 #[allow(dead_code)]
 impl WatsonState {
@@ -273,7 +273,7 @@ impl WatsonState {
             }
         })
     }
-    pub fn notify_update(&self, func: BackendFunc) {
+    pub fn notify_update(&self, func: BackendFuncType) {
         if let Some(subs) = self.subscribers.get(&func) {
             subs.iter()
                 .filter_map(|w| w.upgrade())

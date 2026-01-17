@@ -1,8 +1,9 @@
 use crate::{
-    config::{WidgetOrientation, WidgetSpec},
-    ui::widgets::{
+    config::{WidgetBase, WidgetOrientation, WidgetSpec},
+    ui::widgets::utils::{
+        animation::*,
         interactives::WidgetBehavior,
-        utils::{AnimationDirection, AnimationState, CairoShapesExt, EaseFunction, Rgba},
+        render::{CairoShapesExt, Rgba},
     },
 };
 use common::protocol::AtomicSystemState;
@@ -46,23 +47,85 @@ pub struct SliderBuilder {
     edit_lock: Rc<Cell<bool>>,
 }
 impl SliderBuilder {
-    pub fn new(specs: &WidgetSpec, system_state: Arc<AtomicSystemState>, in_holder: bool) -> Self {
-        let (_, _, _, _range, orientation) = specs.as_slider().unwrap();
+    pub fn new(specs: WidgetSpec, system_state: Arc<AtomicSystemState>, in_holder: bool) -> Self {
+        let (base, func_spec, _range, orientation) = specs.as_slider().unwrap();
+        let func = func_spec.build();
 
-        match orientation {
-            WidgetOrientation::Vertical => Self::vertical(specs, system_state, in_holder),
-            WidgetOrientation::Horizontal => Self::horizontal(specs, system_state, in_holder),
+        let (overlay, area, icon) = match orientation {
+            WidgetOrientation::Vertical => Self::vertical_ui(&base, &func, in_holder),
+            WidgetOrientation::Horizontal => Self::horizontal_ui(&base, &func, in_holder),
+        };
+
+        if let Some(id) = base.id {
+            area.set_widget_name(&id);
+        }
+        if let Some(class) = base.class {
+            area.add_css_class(&class);
+        }
+
+        let animation_state = Rc::new(AnimationState::new());
+        let edit_lock = Rc::new(Cell::new(false));
+
+        Slider::connect_drag(
+            &area,
+            Arc::clone(&system_state),
+            &func,
+            orientation,
+            icon,
+            Rc::clone(&animation_state),
+            Rc::clone(&edit_lock),
+        );
+
+        area.set_draw_func({
+            let system_state = Arc::clone(&system_state);
+            let func = func.clone();
+            let animation_state = Rc::clone(&animation_state);
+            move |area, ctx, w, h| match orientation {
+                WidgetOrientation::Vertical => Slider::draw_vert(
+                    area,
+                    ctx,
+                    w,
+                    h,
+                    Arc::clone(&system_state),
+                    &func,
+                    Rc::clone(&animation_state),
+                ),
+                WidgetOrientation::Horizontal => Slider::draw_horz(
+                    area,
+                    ctx,
+                    w,
+                    h,
+                    Arc::clone(&system_state),
+                    &func,
+                    Rc::clone(&animation_state),
+                ),
+            }
+        });
+        area.add_tick_callback({
+            let animation_state = Rc::clone(&animation_state);
+            move |widget, frame_clock| {
+                if !animation_state.running.get() {
+                    return gtk4::glib::ControlFlow::Continue;
+                }
+                animation_state.update(frame_clock);
+                widget.queue_draw();
+                gtk4::glib::ControlFlow::Continue
+            }
+        });
+
+        Self {
+            area,
+            overlay,
+            func,
+            edit_lock,
         }
     }
-    pub fn vertical(
-        specs: &WidgetSpec,
-        system_state: Arc<AtomicSystemState>,
+    pub fn vertical_ui(
+        base: &WidgetBase,
+        func: &Box<dyn WidgetBehavior>,
         in_holder: bool,
-    ) -> Self {
-        let (base, func, icon, _range, _) = specs.as_slider().unwrap();
-        let func = func.build();
-
-        let icon = icon.unwrap_or(func.icon_name(50).to_string());
+    ) -> (Overlay, DrawingArea, WeakRef<Image>) {
+        let icon = func.icon_name(50).to_string();
 
         let builder = Overlay::builder()
             .css_classes(["widget", "slider", "vertical"])
@@ -92,79 +155,13 @@ impl SliderBuilder {
         overlay.set_child(Some(&area));
         overlay.add_overlay(&svg_icon);
 
-        if let Some(id) = specs.id() {
-            area.set_widget_name(id);
-        }
-        if let Some(class) = specs.class() {
-            area.add_css_class(class);
-        }
-
-        // Setup animations
-        let animation_state = Rc::new(AnimationState::new());
-        area.add_tick_callback({
-            let animation_state = Rc::clone(&animation_state);
-            move |widget, frame_clock| {
-                if !animation_state.running.get() {
-                    return gtk4::glib::ControlFlow::Continue;
-                }
-                animation_state.update(frame_clock);
-                widget.queue_draw();
-                gtk4::glib::ControlFlow::Continue
-            }
-        });
-
-        let edit_lock = Rc::new(Cell::new(false));
-        Slider::connect_drag(
-            &area,
-            Arc::clone(&system_state),
-            &func,
-            WidgetOrientation::Vertical,
-            svg_icon.downgrade(),
-            Rc::clone(&animation_state),
-            Rc::clone(&edit_lock),
-        );
-
-        area.set_draw_func({
-            let system_state = Arc::clone(&system_state);
-            let func = func.clone();
-            move |area, ctx, width, height| {
-                Slider::draw_vert(
-                    area,
-                    ctx,
-                    width,
-                    height,
-                    Arc::clone(&system_state),
-                    &func,
-                    Rc::clone(&animation_state),
-                );
-            }
-        });
-
-        let area_clone = area.downgrade();
-        gtk4::glib::timeout_add_seconds_local(30, {
-            move || {
-                if let Some(clock) = area_clone.upgrade() {
-                    clock.queue_draw();
-                }
-                gtk4::glib::ControlFlow::Continue
-            }
-        });
-
-        Self {
-            area,
-            overlay,
-            func,
-            edit_lock,
-        }
+        (overlay, area, svg_icon.downgrade())
     }
-    pub fn horizontal(
-        specs: &WidgetSpec,
-        system_state: Arc<AtomicSystemState>,
+    fn horizontal_ui(
+        base: &WidgetBase,
+        func: &Box<dyn WidgetBehavior>,
         in_holder: bool,
-    ) -> Self {
-        let (base, func, _, _range, _) = specs.as_slider().unwrap();
-        let func = func.build();
-
+    ) -> (Overlay, DrawingArea, WeakRef<Image>) {
         let builder = Overlay::builder()
             .css_classes(["widget", "slider", "horizontal"])
             .hexpand(true)
@@ -203,70 +200,7 @@ impl SliderBuilder {
 
         overlay.set_child(Some(&content));
 
-        if let Some(id) = specs.id() {
-            area.set_widget_name(id);
-        }
-        if let Some(class) = specs.class() {
-            area.add_css_class(class);
-        }
-
-        // Setup animations
-        let animation_state = Rc::new(AnimationState::new());
-        area.add_tick_callback({
-            let animation_state = Rc::clone(&animation_state);
-            move |widget, frame_clock| {
-                if !animation_state.running.get() {
-                    return gtk4::glib::ControlFlow::Continue;
-                }
-                animation_state.update(frame_clock);
-                widget.queue_draw();
-                gtk4::glib::ControlFlow::Continue
-            }
-        });
-
-        let edit_lock = Rc::new(Cell::new(false));
-        Slider::connect_drag(
-            &area,
-            Arc::clone(&system_state),
-            &func,
-            WidgetOrientation::Horizontal,
-            WeakRef::default(),
-            Rc::clone(&animation_state),
-            Rc::clone(&edit_lock),
-        );
-
-        area.set_draw_func({
-            let func = func.clone();
-            let system_state = Arc::clone(&system_state);
-            move |area, ctx, width, height| {
-                Slider::draw_horz(
-                    area,
-                    ctx,
-                    width,
-                    height,
-                    Arc::clone(&system_state),
-                    &func,
-                    Rc::clone(&animation_state),
-                );
-            }
-        });
-
-        let area_clone = area.downgrade();
-        gtk4::glib::timeout_add_seconds_local(30, {
-            move || {
-                if let Some(clock) = area_clone.upgrade() {
-                    clock.queue_draw();
-                }
-                gtk4::glib::ControlFlow::Continue
-            }
-        });
-
-        Self {
-            area,
-            overlay,
-            func,
-            edit_lock,
-        }
+        (overlay, area, WeakRef::new())
     }
     pub fn for_box(self, container: &GtkBox) -> Self {
         container.append(&self.overlay);

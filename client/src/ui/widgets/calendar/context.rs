@@ -10,7 +10,7 @@ use crate::{
             cache::CalendarCache,
             types::{CalendarConfig, CalendarHMFormat},
         },
-        utils::Rgba,
+        utils::render::Rgba,
     },
 };
 

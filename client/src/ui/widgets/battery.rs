@@ -2,7 +2,10 @@ use std::{cell::Cell, rc::Rc, str::FromStr};
 
 use crate::{
     config::WidgetSpec,
-    ui::widgets::utils::{CairoShapesExt, Rgba, WidgetOption},
+    ui::widgets::utils::{
+        WidgetOption,
+        render::{CairoShapesExt, Rgba},
+    },
 };
 use common::{
     protocol::BatteryState,
@@ -46,8 +49,7 @@ pub struct BatteryBuilder {
     status: Rc<Cell<BatteryStatus>>,
 }
 impl BatteryBuilder {
-    pub fn new(specs: &WidgetSpec, in_holder: bool) -> Self {
-        let specs = Rc::new(specs.clone());
+    pub fn new(specs: WidgetSpec, in_holder: bool) -> Self {
         let base = specs.base();
 
         let builder = DrawingArea::builder().css_classes(["widget", "battery"]);
@@ -80,7 +82,6 @@ impl BatteryBuilder {
         let status = Rc::new(Cell::new(status));
 
         bat_area.set_draw_func({
-            let specs = Rc::clone(&specs);
             let status = Rc::clone(&status);
             move |area, ctx, width, height| {
                 let tooltip = status

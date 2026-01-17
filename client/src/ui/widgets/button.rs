@@ -1,6 +1,6 @@
 use crate::{
     config::WidgetSpec,
-    ui::widgets::{interactives::WidgetBehavior, utils::Rgba},
+    ui::widgets::utils::{interactives::WidgetBehavior, render::Rgba},
 };
 use common::protocol::AtomicSystemState;
 use gtk4::{
@@ -12,7 +12,7 @@ use gtk4::{
     },
     prelude::{BoxExt, DrawingAreaExtManual, WidgetExt},
 };
-use std::{rc::Rc, sync::Arc};
+use std::sync::Arc;
 
 pub struct Button {
     pub weak: WeakRef<Widget>,
@@ -32,8 +32,7 @@ pub struct ButtonBuilder {
     func: Box<dyn WidgetBehavior>,
 }
 impl ButtonBuilder {
-    pub fn new(specs: &WidgetSpec, system_state: Arc<AtomicSystemState>, in_holder: bool) -> Self {
-        let specs = Rc::new(specs.clone());
+    pub fn new(specs: WidgetSpec, system_state: Arc<AtomicSystemState>, in_holder: bool) -> Self {
         let (base, func, icon) = specs.as_button().unwrap();
         let func = func.build();
 
@@ -82,11 +81,11 @@ impl ButtonBuilder {
         overlay.set_child(Some(&button_holder));
         overlay.add_overlay(&svg_icon);
 
-        if let Some(id) = specs.id() {
-            area.set_widget_name(id);
+        if let Some(id) = base.id {
+            area.set_widget_name(&id);
         }
-        if let Some(class) = specs.class() {
-            area.add_css_class(class);
+        if let Some(class) = base.class {
+            area.add_css_class(&class);
         }
 
         area.set_draw_func({

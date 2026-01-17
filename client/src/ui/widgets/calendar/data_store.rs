@@ -52,9 +52,14 @@ impl CalendarDataStore {
             .map_err(|e| watson_err!(WatsonErrorKind::FileOpen, e.to_string()))?;
 
         let reader = BufReader::new(file);
-        let (cached_timed, cached_allday): (Vec<CalDavEvent>, Vec<CalDavEvent>) =
+        let (mut cached_timed, mut cached_allday): (Vec<CalDavEvent>, Vec<CalDavEvent>) =
             bincode::deserialize_from(reader)
                 .map_err(|e| watson_err!(WatsonErrorKind::Deserialize, e.to_string()))?;
+
+        // Cache invalidation
+        let today = Local::now().date_naive();
+        cached_timed.retain(|e| e.occurs_on_day(&today));
+        cached_allday.retain(|e| e.occurs_on_day(&today));
 
         *self.timed.borrow_mut() = cached_timed;
         *self.allday.borrow_mut() = cached_allday;

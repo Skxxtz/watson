@@ -1,2 +1,2 @@
 mod structs;
-pub use structs::{WidgetOrientation, WidgetSpec, load_config};
+pub use structs::{WidgetBase, WidgetOrientation, WidgetSpec, load_config};
