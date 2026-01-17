@@ -6,8 +6,8 @@
     --background: #181818;
     --muted: #333333;
     --accent: #5688c7;
-    --orange: #BF5D32;
-    --green: #567B45;
+    --orange: #bf5d32;
+    --green: #567b45;
 
     --text-100: hsl(0, 0%, 100%);
     --text-90: hsl(0, 0%, 90%);
@@ -98,6 +98,7 @@ scrolledwindow undershoot.bottom {
     margin: 0;
     border-radius: var(--widget-normal-radius);
 }
+
 .calendar-details button:hover {
     background-color: transparent;
     background: transparent;
@@ -130,6 +131,7 @@ scrolledwindow undershoot.bottom {
     line-height: 1.5;
     opacity: 0.9;
 }
+
 .dim-label {
     color: var(--text-60);
 }
@@ -171,6 +173,7 @@ scrolledwindow undershoot.bottom {
 .button.state-1 .button-obj {
     color: var(--accent);
 }
+
 .button.state-0 .button-obj {
     color: var(--text-20);
 }
@@ -178,25 +181,30 @@ scrolledwindow undershoot.bottom {
 .button.powermode image {
     -gtk-icon-size: 24px;
 }
+
 .button.powermode.state-0 .button-obj {
     color: var(--green);
 }
+
 .button.powermode.state-0 image {
     color: var(--text-100);
 }
+
 .button.powermode.state-1 .button-obj {
     color: var(--text-20);
 }
+
 .button.powermode.state-1 image {
     color: gray;
 }
+
 .button.powermode.state-2 .button-obj {
     color: var(--orange);
 }
+
 .button.powermode.state-2 image {
     color: var(--text-100);
 }
-
 
 /* Sliders */
 /* ------------- */
@@ -204,6 +212,10 @@ scrolledwindow undershoot.bottom {
     color: #333333;
     border-radius: 999px;
     min-width: 60px;
+}
+
+.slider.vertical {
+    padding: 0;
 }
 
 .slider-obj {
