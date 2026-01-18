@@ -1,4 +1,7 @@
-use std::sync::Arc;
+use std::sync::{
+    Arc,
+    atomic::{AtomicU8, Ordering},
+};
 
 use common::{
     protocol::{DaemonService, InternalMessage},
@@ -107,7 +110,7 @@ pub async fn audio_actor(
         }
     })));
 
-    let mut last_percentage: u8 = 0;
+    let last_percentage = Arc::new(AtomicU8::new(0));
     loop {
         // Ghost check
         loop {
@@ -123,8 +126,8 @@ pub async fn audio_actor(
             Some(cmd) = rx.recv() => {
                 match cmd {
                     AudioCommand::SetVolume(v) => {
-                        if v != last_percentage {
-                            last_percentage = v;
+                        if v != last_percentage.load(Ordering::Relaxed) {
+                            last_percentage.store(v, Ordering::Relaxed);
                             let mut cv = ChannelVolumes::default();
                             let val = ((v as f64 / 100.0) * Volume::NORMAL.0 as f64) as u32;
                             cv.set(2, Volume(val));
@@ -133,26 +136,32 @@ pub async fn audio_actor(
                         }
                     }
                     AudioCommand::GetVolume { resp } => {
-                        let mut resp_opt = Some(resp);
-                        ctx.introspect().get_sink_info_by_name("@DEFAULT_SINK@", move |info| {
-                            if let libpulse_binding::callbacks::ListResult::Item(i) = info {
-                                let percent = ((i.volume.avg().0 as f64 / Volume::NORMAL.0 as f64) * 100.0) as u8;
-                                last_percentage = percent;
-                                if let Some(r) = resp_opt.take() {
-                                    let _ = r.send(percent);
+                        ctx.introspect().get_sink_info_by_name("@DEFAULT_SINK@", {
+                            let mut resp_opt = Some(resp);
+                            let last_percentage = Arc::clone(&last_percentage);
+                            move |info| {
+                                if let libpulse_binding::callbacks::ListResult::Item(i) = info {
+                                    let percent = ((i.volume.avg().0 as f64 / Volume::NORMAL.0 as f64) * 100.0) as u8;
+                                    last_percentage.store(percent, Ordering::Relaxed);
+                                    if let Some(r) = resp_opt.take() {
+                                        let _ = r.send(percent);
+                                    }
                                 }
                             }
                         });
                         mainloop.signal(false);
                     }
                     AudioCommand::VolumeFetch { index } => {
-                        ctx.introspect().get_sink_info_by_index(index, move |info| {
-                            if let libpulse_binding::callbacks::ListResult::Item(item) = info {
-                                let avg_vol = item.volume.avg().0;
-                                let percentage = ((avg_vol as f64 / Volume::NORMAL.0 as f64) * 100.0) as u8;
-                                if percentage != last_percentage {
-                                    last_percentage = percentage;
-                                    let _result = DAEMON_TX.get().map(|d| d.send(InternalMessage::VolumeStateChange { percentage }));
+                        ctx.introspect().get_sink_info_by_index(index, {
+                            let last_percentage = Arc::clone(&last_percentage);
+                            move |info| {
+                                if let libpulse_binding::callbacks::ListResult::Item(item) = info {
+                                    let avg_vol = item.volume.avg().0;
+                                    let percentage = ((avg_vol as f64 / Volume::NORMAL.0 as f64) * 100.0) as u8;
+                                    if percentage != last_percentage.load(Ordering::Relaxed) {
+                                        last_percentage.store(percentage, Ordering::Relaxed);
+                                        let _result = DAEMON_TX.get().map(|d| d.send(InternalMessage::VolumeStateChange { percentage }));
+                                    }
                                 }
                             }
                         });
