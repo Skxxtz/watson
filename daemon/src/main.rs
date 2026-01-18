@@ -20,12 +20,14 @@ use zbus::zvariant::OwnedValue;
 use common::tokio::{AsyncSizedMessage, SizedMessageObj};
 use zbus::conn::Builder;
 
+mod core;
 mod hardware;
 mod notify;
-mod service_reg;
 use notify::{DaemonHandle, NotificationDaemon};
+mod utils;
 
 use crate::hardware::{AudioCommand, SystemStateBuilder, audio_actor};
+use crate::utils::command::spawn_detached;
 
 static DAEMON_TX: OnceLock<Sender<InternalMessage>> = OnceLock::new();
 
@@ -304,7 +306,7 @@ impl RequestHandler for Request {
                 Ok(state) => Response::SystemState(state),
                 Err(e) => Response::Error(e.message),
             },
-            Request::Command(_) => Response::Todo,
+            Request::Command(cmd) => spawn_detached(&cmd).into_response(),
         }
     }
 }
