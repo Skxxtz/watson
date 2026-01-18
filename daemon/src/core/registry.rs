@@ -5,7 +5,7 @@ use std::{
 };
 use strum::IntoEnumIterator;
 
-pub struct ServiceRegister {
+pub struct ServiceRegistry {
     /// Format:
     /// ```text
     /// 00000000
@@ -14,7 +14,7 @@ pub struct ServiceRegister {
     registered_services: AtomicU8,
 }
 #[allow(dead_code)]
-impl ServiceRegister {
+impl ServiceRegistry {
     pub fn new() -> Self {
         Self {
             registered_services: AtomicU8::new(0),
@@ -49,7 +49,7 @@ impl ServiceRegister {
         self.registered_services.store(0, Ordering::Relaxed);
     }
 }
-impl Display for ServiceRegister {
+impl Display for ServiceRegistry {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         let mut first = true;
         let mut found_any = false;

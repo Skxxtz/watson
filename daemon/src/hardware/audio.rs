@@ -14,7 +14,7 @@ use libpulse_binding::{
 };
 use tokio::sync::{Notify, mpsc, oneshot};
 
-use crate::{DAEMON_TX, hardware::HardwareController, service_reg::ServiceRegister};
+use crate::{DAEMON_TX, core::registry::ServiceRegistry, hardware::HardwareController};
 
 #[derive(Debug)]
 pub struct VolumeState {
@@ -76,7 +76,7 @@ pub async fn audio_actor(
     tx: mpsc::Sender<AudioCommand>,
     mut rx: mpsc::Receiver<AudioCommand>,
     wake_signal: Arc<Notify>,
-    register: Arc<ServiceRegister>,
+    register: Arc<ServiceRegistry>,
 ) {
     use libpulse_binding::mainloop::threaded::Mainloop;
     let mut mainloop = Mainloop::new().unwrap();

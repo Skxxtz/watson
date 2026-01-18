@@ -10,8 +10,8 @@ use zbus::zvariant::OwnedValue;
 use zbus::{Connection, interface};
 
 use crate::DAEMON_TX;
+use crate::core::registry::ServiceRegistry;
 use crate::hardware::HardwareController;
-use crate::service_reg::ServiceRegister;
 
 pub struct DaemonHandle {
     daemon: Arc<RwLock<NotificationDaemon>>,
@@ -32,7 +32,7 @@ pub struct NotificationDaemon {
     pub wake_signal: Arc<Notify>,
     pub hardware: HardwareController,
     pub settings: DaemonSettings,
-    pub register: Arc<ServiceRegister>,
+    pub register: Arc<ServiceRegistry>,
 }
 impl NotificationDaemon {
     pub async fn new() -> Result<Self, WatsonError> {
@@ -45,7 +45,7 @@ impl NotificationDaemon {
             wake_signal: Arc::new(Notify::new()),
             hardware: HardwareController::new(conn),
             settings: DaemonSettings { silent: false },
-            register: Arc::new(ServiceRegister::new()),
+            register: Arc::new(ServiceRegistry::new()),
         })
     }
 
