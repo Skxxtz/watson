@@ -174,12 +174,12 @@ impl SliderBuilder {
         let overlay = if in_holder { builder } else { builder }.build();
 
         let icon_left = Image::builder()
-            .icon_name(func.icon_name(10))
+            .icon_name(func.icon_name(20))
             .can_target(false)
             .build();
 
         let icon_right = Image::builder()
-            .icon_name(func.icon_name(90))
+            .icon_name(func.icon_name(100))
             .can_target(false)
             .build();
 
