@@ -58,8 +58,14 @@ impl CalendarDataStore {
 
         // Cache invalidation
         let today = Local::now().date_naive();
-        cached_timed.retain(|e| e.occurs_on_day(&today));
-        cached_allday.retain(|e| e.occurs_on_day(&today));
+        cached_timed.retain(|e| {
+            e.seen.set(false);
+            e.occurs_on_day(&today)
+        });
+        cached_allday.retain(|e| {
+            e.seen.set(false);
+            e.occurs_on_day(&today)
+        });
 
         *self.timed.borrow_mut() = cached_timed;
         *self.allday.borrow_mut() = cached_allday;
