@@ -31,6 +31,19 @@ window {
     background: transparent;
     padding: 0px 20px;
 }
+window > #scroll-viewport {
+    animation: slide-in 0.2s ease forwards;
+}
+
+@keyframes slide-in {
+    from {
+        transform: translateX(400px);
+    }
+    to {
+        transform: translateX(0px);
+    }
+    
+}
 
 scrolledwindow overshoot.top,
 scrolledwindow overshoot.bottom,
