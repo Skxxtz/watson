@@ -14,8 +14,8 @@ use tokio::{
     net::{UnixListener, UnixStream},
     sync::{RwLock, broadcast},
 };
-use zbus::Connection;
-use zbus::zvariant::OwnedValue;
+
+use zbus::{zvariant::OwnedValue, Connection};
 
 use suite_223b::tokio::{AsyncSizedMessage, SizedMessageObj};
 use zbus::conn::Builder;

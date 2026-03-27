@@ -8,11 +8,14 @@ use std::{
     sync::atomic::{AtomicBool, AtomicU8, Ordering},
 };
 use strum::{AsRefStr, EnumIter};
+
+#[cfg(feature = "daemon")]
 use zbus::zvariant::OwnedValue;
+#[cfg(feature = "daemon")]
+use crate::notification::Notification;
 
 use crate::{
     calendar::utils::{CalDavEvent, structs::EventFilter},
-    notification::Notification,
     utils::errors::{WatsonError, WatsonErrorKind},
     watson_err,
 };
@@ -156,8 +159,12 @@ pub enum Response {
         running: bool,
         silent: bool,
     },
+
+    #[cfg(feature = "daemon")]
     Notification(Option<Notification>),
+    #[cfg(feature = "daemon")]
     Notifications(Vec<Notification>),
+
     SystemState(SystemStateRaw),
     BatteryState {
         state: BatteryState,
@@ -240,6 +247,7 @@ impl From<PowerMode> for u8 {
     }
 }
 
+#[cfg(feature = "daemon")]
 impl TryFrom<OwnedValue> for PowerMode {
     type Error = zbus::Error;
 
