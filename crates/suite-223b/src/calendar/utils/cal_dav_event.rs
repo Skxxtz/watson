@@ -20,6 +20,17 @@ pub struct CalendarInfo {
     pub color: Option<String>,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+pub enum MeetingProvider {
+    MicrosoftTeams,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct Meeting {
+    pub provider: MeetingProvider,
+    pub url: String,
+}
+
 #[derive(Default, Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct CalDavEvent {
     pub uid: String,
@@ -48,6 +59,8 @@ pub struct CalDavEvent {
     pub calendar_info: Arc<CalendarInfo>,
 
     pub event_type: CalEventType,
+
+    pub meeting: Option<Meeting>,
 
     pub seen: Cell<bool>,
 }
@@ -90,6 +103,15 @@ impl TryFrom<IcalEvent> for CalDavEvent {
                 "ATTENDEE" => {
                     if let Ok(attendee) = Attendee::try_from(prop) {
                         out.attendees.push(attendee);
+                    }
+                }
+
+                "X-MICROSOFT-SKYPETEAMSMEETINGURL" => {
+                    if let Some(url) = prop.value {
+                        out.meeting = Some(Meeting {
+                            provider: MeetingProvider::MicrosoftTeams,
+                            url,
+                        })
                     }
                 }
 

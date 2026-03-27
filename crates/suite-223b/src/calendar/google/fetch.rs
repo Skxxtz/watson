@@ -1,7 +1,11 @@
-use std::{cell::Cell, sync::Arc};
+use std::{
+    cell::Cell,
+    sync::{Arc, OnceLock},
+};
 
 use async_trait::async_trait;
 use chrono::{DateTime, FixedOffset, NaiveDate, Utc};
+use regex::bytes::Regex;
 use reqwest::Client;
 use serde::Deserialize;
 
@@ -11,7 +15,7 @@ use crate::{
         google::auth::GoogleAuth,
         protocol::CalendarProvider,
         utils::{
-            CalDavEvent, CalEventType, CalendarInfo,
+            CalDavEvent, CalEventType, CalendarInfo, Meeting, MeetingProvider,
             structs::{Attendee, DateTimeSpec, RecurrenceRule},
         },
     },
@@ -98,9 +102,11 @@ impl GoogleCalendarEvent {
             }
             _ => CalEventType::AllDay,
         };
+
         CalDavEvent {
             uid: self.id,
             title: self.title.unwrap_or("Untitled Event".into()),
+            meeting: self.description.as_deref().and_then(extract_meeting),
             description: self.description,
             location: self.location,
             start,
@@ -307,4 +313,20 @@ impl CalendarProvider for GoogleCalendarClient {
 
         Ok(events)
     }
+}
+
+pub fn extract_meeting(text: &str) -> Option<Meeting> {
+    static TEAMS_REGEX: OnceLock<Regex> = OnceLock::new();
+    let re = TEAMS_REGEX.get_or_init(|| {
+        Regex::new(r#"https://teams\.(microsoft|live)\.com/meet/[^\s"<>]+"#)
+            .expect("Invalid Teams Regex")
+    });
+
+    let m = re.find(text.as_bytes())?;
+    let url = text[m.start()..m.end()].to_string();
+
+    Some(Meeting {
+        provider: MeetingProvider::MicrosoftTeams,
+        url,
+    })
 }
