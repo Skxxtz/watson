@@ -3,14 +3,14 @@ use std::sync::{
     atomic::{AtomicU8, Ordering},
 };
 
-use common::{
-    protocol::{DaemonService, InternalMessage},
-    utils::errors::{WatsonError, WatsonErrorKind},
-    watson_err,
-};
 use libpulse_binding::{
     context::{Context, FlagSet},
     volume::{ChannelVolumes, Volume},
+};
+use suite_223b::{
+    protocol::{DaemonService, InternalMessage},
+    utils::errors::{WatsonError, WatsonErrorKind},
+    watson_err,
 };
 use tokio::sync::{Notify, mpsc, oneshot};
 

@@ -1,8 +1,8 @@
 use std::{rc::Rc, str::FromStr};
 
 use chrono::{Local, NaiveTime, Timelike};
-use common::calendar::utils::CalDavEvent;
 use gtk4::cairo::{Context, FontSlant, FontWeight};
+use suite_223b::calendar::utils::CalDavEvent;
 
 use crate::ui::widgets::{
     calendar::{CalendarContext, EventHitbox, data_store::CalendarDataStore},

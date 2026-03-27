@@ -1,10 +1,10 @@
 use std::collections::HashMap;
 use std::sync::Arc;
 
-use common::notification::Notification;
-use common::protocol::InternalMessage;
-use common::utils::errors::{WatsonError, WatsonErrorKind};
-use common::watson_err;
+use suite_223b::notification::Notification;
+use suite_223b::protocol::InternalMessage;
+use suite_223b::utils::errors::{WatsonError, WatsonErrorKind};
+use suite_223b::watson_err;
 use tokio::sync::{Notify, RwLock};
 use zbus::zvariant::OwnedValue;
 use zbus::{Connection, interface};
@@ -12,6 +12,7 @@ use zbus::{Connection, interface};
 use crate::DAEMON_TX;
 use crate::core::registry::ServiceRegistry;
 use crate::hardware::HardwareController;
+use crate::software::SoftwareController;
 
 pub struct DaemonHandle {
     daemon: Arc<RwLock<NotificationDaemon>>,
@@ -31,6 +32,7 @@ pub struct NotificationDaemon {
     buffer: HashMap<u32, Notification>,
     pub wake_signal: Arc<Notify>,
     pub hardware: HardwareController,
+    pub software: SoftwareController,
     pub settings: DaemonSettings,
     pub register: Arc<ServiceRegistry>,
 }
@@ -44,6 +46,7 @@ impl NotificationDaemon {
             buffer: HashMap::new(),
             wake_signal: Arc::new(Notify::new()),
             hardware: HardwareController::new(conn),
+            software: SoftwareController::new().await,
             settings: DaemonSettings { silent: false },
             register: Arc::new(ServiceRegistry::new()),
         })

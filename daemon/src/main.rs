@@ -1,13 +1,13 @@
 use async_trait::async_trait;
-use common::protocol::{
-    BatteryState, DaemonService, InternalMessage, IntoResponse, Request, Response, SocketData,
-};
-use common::utils::errors::{WatsonError, WatsonErrorKind};
-use common::watson_err;
 use futures_util::StreamExt;
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, OnceLock};
+use suite_223b::protocol::{
+    BatteryState, DaemonService, InternalMessage, IntoResponse, Request, Response, SocketData,
+};
+use suite_223b::utils::errors::{WatsonError, WatsonErrorKind};
+use suite_223b::watson_err;
 use tokio::sync::broadcast::Sender;
 use tokio::sync::mpsc;
 use tokio::{
@@ -17,13 +17,15 @@ use tokio::{
 use zbus::Connection;
 use zbus::zvariant::OwnedValue;
 
-use common::tokio::{AsyncSizedMessage, SizedMessageObj};
+use suite_223b::tokio::{AsyncSizedMessage, SizedMessageObj};
 use zbus::conn::Builder;
 
 mod core;
 mod hardware;
 mod notify;
 use notify::{DaemonHandle, NotificationDaemon};
+mod calendar;
+mod software;
 mod utils;
 
 use crate::hardware::{AudioCommand, SystemStateBuilder, audio_actor};
@@ -194,6 +196,7 @@ async fn handle_client(
     daemon: Arc<RwLock<NotificationDaemon>>,
     mut rx: broadcast::Receiver<InternalMessage>,
 ) {
+    let config = bincode::config::standard();
     loop {
         tokio::select! {
             result = stream.read_sized() => {
@@ -202,8 +205,8 @@ async fn handle_client(
                     Err(_) => break, // Client disconnected
                 };
 
-                let req: Request = match bincode::deserialize(&buf) {
-                    Ok(r) => r,
+                let req: Request = match bincode::serde::decode_from_slice(&buf, config) {
+                    Ok((r, _)) => r,
                     Err(_) => continue,
                 };
 
@@ -307,6 +310,9 @@ impl RequestHandler for Request {
                 Err(e) => Response::Error(e.message),
             },
             Request::Command(cmd) => spawn_detached(&cmd).into_response(),
+            Request::Event(filter) => {
+                Response::Events(daemon.software.events.get_events_with_filter(filter))
+            }
         }
     }
 }

@@ -7,16 +7,16 @@ use crate::{
         render::{CairoShapesExt, Rgba},
     },
 };
-use common::{
-    protocol::BatteryState,
-    utils::errors::{WatsonError, WatsonErrorKind},
-    watson_err,
-};
 use gtk4::{
     Align, Box, DrawingArea,
     cairo::{Context, LineCap},
     glib::{WeakRef, object::ObjectExt},
     prelude::{BoxExt, DrawingAreaExtManual, WidgetExt},
+};
+use suite_223b::{
+    protocol::BatteryState,
+    utils::errors::{WatsonError, WatsonErrorKind},
+    watson_err,
 };
 
 #[derive(Clone, Debug)]

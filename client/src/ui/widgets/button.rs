@@ -2,7 +2,6 @@ use crate::{
     config::WidgetSpec,
     ui::widgets::utils::{interactives::WidgetBehavior, render::Rgba},
 };
-use common::protocol::AtomicSystemState;
 use gtk4::{
     Box as GtkBox, DrawingArea, GestureClick, Image, Overlay, Widget,
     cairo::Context,
@@ -13,6 +12,7 @@ use gtk4::{
     prelude::{BoxExt, DrawingAreaExtManual, WidgetExt},
 };
 use std::sync::Arc;
+use suite_223b::protocol::AtomicSystemState;
 
 pub struct Button {
     pub weak: WeakRef<Widget>,

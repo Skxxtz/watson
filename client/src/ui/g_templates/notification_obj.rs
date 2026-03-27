@@ -3,9 +3,9 @@
 use std::cell::RefCell;
 use std::rc::Rc;
 
-use common::notification::Notification;
 use gtk4::glib::subclass::prelude::*;
 use gtk4::glib::{self, Object};
+use suite_223b::notification::Notification;
 
 mod imp {
     use std::rc::Weak;

@@ -6,8 +6,9 @@ use std::{
     rc::Rc,
 };
 
+use bincode::config;
 use chrono::Local;
-use common::{
+use suite_223b::{
     auth::CredentialManager,
     calendar::utils::{CalDavEvent, CalEventType},
     utils::{
@@ -51,9 +52,10 @@ impl CalendarDataStore {
         let file = fs::File::open(path)
             .map_err(|e| watson_err!(WatsonErrorKind::FileOpen, e.to_string()))?;
 
-        let reader = BufReader::new(file);
+        let mut reader = BufReader::new(file);
+        let config = config::standard();
         let (mut cached_timed, mut cached_allday): (Vec<CalDavEvent>, Vec<CalDavEvent>) =
-            bincode::deserialize_from(reader)
+            bincode::serde::decode_from_reader(&mut reader, config)
                 .map_err(|e| watson_err!(WatsonErrorKind::Deserialize, e.to_string()))?;
 
         // Cache invalidation
@@ -79,9 +81,10 @@ impl CalendarDataStore {
         let file = fs::File::create(path)
             .map_err(|e| watson_err!(WatsonErrorKind::FileOpen, e.to_string()))?;
 
-        let writer = BufWriter::new(file);
+        let mut writer = BufWriter::new(file);
+        let config = config::standard();
         let data = (&*self.timed.borrow(), &*self.allday.borrow());
-        bincode::serialize_into(writer, &data)
+        bincode::serde::encode_into_std_write(&data, &mut writer, config)
             .map_err(|e| watson_err!(WatsonErrorKind::Serialize, e.to_string()))?;
 
         Ok(())

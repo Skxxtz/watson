@@ -40,11 +40,11 @@ mod imp {
 
 use std::rc::Rc;
 
-use common::notification::Notification;
 use gtk4::gio::{ActionGroup, ActionMap};
 use gtk4::glib::Object;
 use gtk4::glib::subclass::types::ObjectSubclassIsExt;
 use gtk4::prelude::WidgetExt;
+use suite_223b::notification::Notification;
 
 gtk4::glib::wrapper! {
     pub struct NotificationWidget(ObjectSubclass<imp::NotificationWidget>)

@@ -1,9 +1,9 @@
-use common::protocol::DaemonService;
 use std::{
     fmt::Display,
     sync::atomic::{AtomicU8, Ordering},
 };
 use strum::IntoEnumIterator;
+use suite_223b::protocol::DaemonService;
 
 pub struct ServiceRegistry {
     /// Format:

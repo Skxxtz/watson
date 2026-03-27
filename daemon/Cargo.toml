@@ -8,13 +8,14 @@ name = "watson-daemon"
 path = "src/main.rs"
 
 [dependencies]
-async-trait = "0.1.89"
-common = { path = "../common" }
+async-trait = "^0.1.89"
+suite-223b = { path = "../crates/suite-223b" }
 futures-util = "0.3.31"
 serde_json = "1.0"
 strum = "0.27.2"
+chrono = "0.4.42"
 tokio = {version = "1.48.0", default-features = false, features = ["macros"]}
 zbus = {version = "5.12.0", default-features = false, features = ["tokio"]}
-bincode = "1.3"
+bincode = {version = "2.0.1", features = ["serde"]}
 libpulse-binding = "2.30.1"
 libc = "0.2.180"

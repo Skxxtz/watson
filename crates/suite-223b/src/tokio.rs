@@ -15,8 +15,10 @@ impl SizedMessageObj {
     /// The ONLY way to create a message for the wire.
     /// This guarantees Bincode is used every time.
     pub fn from_struct<T: Serialize>(data: &T) -> Result<Self, WatsonError> {
-        let buffer = bincode::serialize(data)
+        let config = bincode::config::standard();
+        let buffer = bincode::serde::encode_to_vec(data, config)
             .map_err(|e| watson_err!(WatsonErrorKind::Serialize, e.to_string()))?;
+
         Ok(Self { buffer })
     }
 

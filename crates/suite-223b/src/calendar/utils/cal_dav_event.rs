@@ -160,6 +160,9 @@ impl CalDavEvent {
 
         *day_to_check >= start_local && *day_to_check <= end_local
     }
+    pub fn start_utc(&self) -> Option<DateTime<Utc>> {
+        self.start.as_ref().map(|spec| spec.utc_time())
+    }
 }
 
 #[derive(Debug)]

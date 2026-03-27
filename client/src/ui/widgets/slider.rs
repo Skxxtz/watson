@@ -6,7 +6,6 @@ use crate::{
         render::{CairoShapesExt, Rgba},
     },
 };
-use common::protocol::AtomicSystemState;
 use gtk4::{
     Box as GtkBox, DrawingArea, GestureDrag, Image, Overlay, Widget,
     cairo::Context,
@@ -26,6 +25,7 @@ use std::{
     sync::Arc,
     time::Instant,
 };
+use suite_223b::protocol::AtomicSystemState;
 
 pub struct Slider {
     pub weak: WeakRef<Widget>,

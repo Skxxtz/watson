@@ -1,11 +1,11 @@
 use std::rc::Rc;
 
-use common::notification::Notification;
 use gtk4::{
     Box, ListBox,
     glib::{WeakRef, object::ObjectExt},
     prelude::BoxExt,
 };
+use suite_223b::notification::Notification;
 
 use crate::{
     config::WidgetSpec,

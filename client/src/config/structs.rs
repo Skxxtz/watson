@@ -1,9 +1,9 @@
 use std::fs::File;
 use std::{io::BufReader, path::PathBuf};
 
-use common::utils::errors::{WatsonError, WatsonErrorKind};
-use common::watson_err;
 use serde::{Deserialize, Serialize};
+use suite_223b::utils::errors::{WatsonError, WatsonErrorKind};
+use suite_223b::watson_err;
 
 use crate::ui::widgets::BackendFuncType;
 use crate::ui::widgets::{

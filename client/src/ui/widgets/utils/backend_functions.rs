@@ -1,7 +1,7 @@
 use std::sync::atomic::Ordering;
 
-use common::protocol::Request;
 use serde::{Deserialize, Serialize};
+use suite_223b::protocol::Request;
 
 use crate::ui::widgets::utils::interactives::*;
 macro_rules! define_backend_functions {

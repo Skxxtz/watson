@@ -1,3 +1,5 @@
+use std::time::Duration;
+
 use chrono::{
     DateTime, Local, NaiveDate, NaiveDateTime, NaiveTime, TimeZone, Utc, offset::LocalResult,
 };
@@ -8,6 +10,19 @@ use crate::{
     utils::errors::{WatsonError, WatsonErrorKind},
     watson_err,
 };
+
+#[derive(Debug, Clone, PartialEq, Deserialize, Serialize)]
+pub enum EventFilter {
+    /// Events occurring entirely within today
+    Today { include_allday: bool },
+
+    /// Events within a specific sliding window relative to 'now'
+    /// e.g. "Started in last 30m" or "Starting in next 15m"
+    Nearby {
+        look_back: Duration,
+        look_ahead: Duration,
+    },
+}
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub enum DateTimeSpec {

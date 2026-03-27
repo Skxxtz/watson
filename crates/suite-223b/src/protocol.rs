@@ -11,6 +11,7 @@ use strum::{AsRefStr, EnumIter};
 use zbus::zvariant::OwnedValue;
 
 use crate::{
+    calendar::utils::{CalDavEvent, structs::EventFilter},
     notification::Notification,
     utils::errors::{WatsonError, WatsonErrorKind},
     watson_err,
@@ -165,6 +166,7 @@ pub enum Response {
     VolumeState {
         percentage: u8,
     },
+    Events(Vec<CalDavEvent>),
 }
 impl Response {
     pub fn is_state_change(&self) -> bool {
@@ -203,6 +205,9 @@ pub enum Request {
     SetBacklight(u8),
     SetVolume(u8),
     Command(String),
+
+    // Software
+    Event(EventFilter),
 }
 
 #[derive(Deserialize, Serialize, Debug, Copy, Clone, PartialEq, Eq, Default)]

@@ -1,13 +1,13 @@
 use super::Loader;
 use crate::ICONS;
-use common::utils::errors::{WatsonError, WatsonErrorKind};
-use common::utils::paths::home_dir;
-use common::watson_err;
 use gtk4::{IconTheme, gdk::Display};
 use std::collections::HashMap;
 use std::env;
 use std::path::{Path, PathBuf};
 use std::sync::{RwLock, RwLockReadGuard, RwLockWriteGuard};
+use suite_223b::utils::errors::{WatsonError, WatsonErrorKind};
+use suite_223b::utils::paths::home_dir;
+use suite_223b::watson_err;
 
 // TODO!
 

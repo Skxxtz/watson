@@ -1,4 +1,4 @@
-use common::{
+use suite_223b::{
     protocol::PowerMode,
     utils::errors::{WatsonError, WatsonErrorKind},
     watson_err,

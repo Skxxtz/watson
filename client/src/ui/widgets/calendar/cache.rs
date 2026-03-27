@@ -1,5 +1,5 @@
 use chrono::{Local, NaiveDateTime};
-use common::calendar::utils::CalDavEvent;
+use suite_223b::calendar::utils::CalDavEvent;
 
 use crate::ui::widgets::calendar::{context::CalendarContext, types::EventHitbox};
 

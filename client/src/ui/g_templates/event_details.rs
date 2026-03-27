@@ -57,11 +57,11 @@ mod imp {
     impl BoxImpl for EventDetails {}
 }
 
-use common::calendar::utils::CalDavEvent;
-use common::calendar::utils::structs::DateTimeSpec;
 use gtk4::glib::Object;
 use gtk4::glib::subclass::types::ObjectSubclassIsExt;
 use gtk4::prelude::*;
+use suite_223b::calendar::utils::CalDavEvent;
+use suite_223b::calendar::utils::structs::DateTimeSpec;
 
 gtk4::glib::wrapper! {
     pub struct EventDetails(ObjectSubclass<imp::EventDetails>)

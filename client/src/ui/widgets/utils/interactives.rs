@@ -1,6 +1,6 @@
 use std::sync::atomic::{AtomicU8, Ordering};
 
-use common::protocol::{AtomicSystemState, Request};
+use suite_223b::protocol::{AtomicSystemState, Request};
 
 use crate::{DAEMON_TX, ui::widgets::utils::backend_functions::BackendFuncType};
 

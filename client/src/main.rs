@@ -16,17 +16,17 @@ use crate::{
         widgets::{BackendFuncType, Battery, NotificationCentre, WatsonWidget, create_widgets},
     },
 };
-use common::{
-    config::flags::ArgParse,
-    notification::Notification,
-    protocol::{AtomicSystemState, Request, Response, UpdateField},
-    utils::errors::WatsonError,
-};
 use gtk4::{
     CssProvider, DrawingArea,
     gdk::Display,
     glib::{WeakRef, object::ObjectExt, subclass::types::ObjectSubclassIsExt},
     prelude::{GtkWindowExt, WidgetExt},
+};
+use suite_223b::{
+    config::flags::ArgParse,
+    notification::Notification,
+    protocol::{AtomicSystemState, Request, Response, UpdateField},
+    utils::errors::WatsonError,
 };
 use tokio::sync::{Notify, broadcast, mpsc::UnboundedSender};
 

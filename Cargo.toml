@@ -1,6 +1,6 @@
 [workspace]
 members = [
-    "common",
+    "crates/suite-223b",
     "client",
     "daemon",
 ]

@@ -1,6 +1,6 @@
 use std::{fs, path::PathBuf};
 
-use common::{
+use suite_223b::{
     utils::errors::{WatsonError, WatsonErrorKind},
     watson_err,
 };

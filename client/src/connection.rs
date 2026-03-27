@@ -1,11 +1,12 @@
-use common::protocol::{AtomicSystemState, Request, Response, SocketData, UpdateField};
-use common::tokio::{AsyncSizedMessage, SizedMessageObj};
-use common::utils::errors::{WatsonError, WatsonErrorKind};
-use common::watson_err;
+use bincode::config;
 use std::mem::discriminant;
 use std::sync::Arc;
 use std::sync::atomic::Ordering;
 use std::time::{Duration, Instant};
+use suite_223b::protocol::{AtomicSystemState, Request, Response, SocketData, UpdateField};
+use suite_223b::tokio::{AsyncSizedMessage, SizedMessageObj};
+use suite_223b::utils::errors::{WatsonError, WatsonErrorKind};
+use suite_223b::watson_err;
 use tokio::net::UnixStream;
 use tokio::net::unix::{OwnedReadHalf, OwnedWriteHalf};
 use tokio::sync::{Notify, broadcast, mpsc};
@@ -62,11 +63,14 @@ impl ClientConnection {
         // 2. Task for READING from the Daemon
         tokio::spawn(async move {
             let mut throttle = Throttle::new(60);
+            let config = config::standard();
 
             loop {
                 match reader.read_sized().await {
                     Ok(buf) => {
-                        if let Ok(v) = bincode::deserialize::<Response>(&buf) {
+                        if let Ok((v, _)) =
+                            bincode::serde::decode_from_slice::<Response, _>(&buf, config)
+                        {
                             match v {
                                 Response::VolumeState { percentage } => {
                                     state.volume.store(percentage, Ordering::Relaxed);

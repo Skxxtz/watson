@@ -1,6 +1,6 @@
 use std::sync::Arc;
 
-use common::{protocol::SystemStateRaw, utils::errors::WatsonError};
+use suite_223b::{protocol::SystemStateRaw, utils::errors::WatsonError};
 use tokio::sync::{Semaphore, mpsc};
 use zbus::Connection;
 
