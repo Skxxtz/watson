@@ -15,7 +15,7 @@ use tokio::{
     sync::{RwLock, broadcast},
 };
 
-use zbus::{zvariant::OwnedValue, Connection};
+use zbus::{Connection, zvariant::OwnedValue};
 
 use suite_223b::tokio::{AsyncSizedMessage, SizedMessageObj};
 use zbus::conn::Builder;

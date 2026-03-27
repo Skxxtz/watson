@@ -1,7 +1,7 @@
 use std::collections::HashMap;
 use std::sync::Arc;
 
-use suite_223b::notification::Notification;
+use suite_223b::notification::{HintValue, Notification};
 use suite_223b::protocol::InternalMessage;
 use suite_223b::utils::errors::{WatsonError, WatsonErrorKind};
 use suite_223b::watson_err;
@@ -84,6 +84,11 @@ impl DaemonHandle {
             .and_then(|v| v.downcast_ref::<u8>().ok())
             .unwrap_or(1);
 
+        let pure_hints: HashMap<String, HintValue> = hints
+            .into_iter()
+            .map(|(key, value)| (key, HintValue::from(value)))
+            .collect();
+
         let notification = Notification {
             id,
             app_name,
@@ -92,7 +97,7 @@ impl DaemonHandle {
             body,
             summary,
             actions,
-            hints,
+            hints: pure_hints,
             expire_timeout,
             urgency: urgency.into(),
         };

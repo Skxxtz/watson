@@ -1,7 +1,15 @@
+use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
-use serde::{Deserialize, Serialize};
-use zbus::zvariant::OwnedValue;
+#[derive(Deserialize, Serialize, Clone, Debug)]
+pub enum HintValue {
+    String(String),
+    Int(i32),
+    Uint(u32),
+    Bool(bool),
+    Byte(u8),
+    None,
+}
 
 #[derive(Deserialize, Serialize, Clone, Debug, Default)]
 pub struct Notification {
@@ -11,7 +19,7 @@ pub struct Notification {
     pub body: String,
     pub summary: String,
     pub actions: Vec<String>,
-    pub hints: HashMap<String, OwnedValue>,
+    pub hints: HashMap<String, HintValue>,
     pub replaces_id: u32,
     pub expire_timeout: i32,
     pub urgency: Urgency,

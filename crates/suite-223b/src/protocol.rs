@@ -9,9 +9,6 @@ use std::{
 };
 use strum::{AsRefStr, EnumIter};
 
-#[cfg(feature = "daemon")]
-use zbus::zvariant::OwnedValue;
-#[cfg(feature = "daemon")]
 use crate::notification::Notification;
 
 use crate::{
@@ -160,9 +157,7 @@ pub enum Response {
         silent: bool,
     },
 
-    #[cfg(feature = "daemon")]
     Notification(Option<Notification>),
-    #[cfg(feature = "daemon")]
     Notifications(Vec<Notification>),
 
     SystemState(SystemStateRaw),
@@ -247,21 +242,6 @@ impl From<PowerMode> for u8 {
     }
 }
 
-#[cfg(feature = "daemon")]
-impl TryFrom<OwnedValue> for PowerMode {
-    type Error = zbus::Error;
-
-    fn try_from(value: OwnedValue) -> Result<Self, Self::Error> {
-        let s: String = value.try_into()?;
-
-        match s.as_str() {
-            "power-saver" => Ok(Self::PowerSave),
-            "balanced" => Ok(Self::Balanced),
-            "performance" => Ok(Self::Performace),
-            _ => Err(Self::Error::InvalidGUID),
-        }
-    }
-}
 impl ToString for PowerMode {
     fn to_string(&self) -> String {
         match self {
