@@ -79,7 +79,16 @@ impl TryFrom<IcalEvent> for CalDavEvent {
 
                 "SUMMARY" => out.title = prop.value.unwrap_or(out.title),
                 "DESCRIPTION" => out.description = prop.value,
-                "LOCATION" => out.location = prop.value,
+                "LOCATION" => {
+                    out.location = prop.value.map(|v| {
+                        v.replace("\\n", ", ")
+                            .replace("\\N", ", ")
+                            .replace('\n', " ")
+                            .replace('\r', "")
+                            .trim()
+                            .to_string()
+                    });
+                }
 
                 "DTSTART" => out.start = Some(DateTimeSpec::try_from(prop)?),
                 "DTEND" => out.end = Some(DateTimeSpec::try_from(prop)?),
@@ -182,8 +191,13 @@ impl CalDavEvent {
 
         *day_to_check >= start_local && *day_to_check <= end_local
     }
+    #[inline(always)]
     pub fn start_utc(&self) -> Option<DateTime<Utc>> {
         self.start.as_ref().map(|spec| spec.utc_time())
+    }
+    #[inline(always)]
+    pub fn end_utc(&self) -> Option<DateTime<Utc>> {
+        self.end.as_ref().map(|spec| spec.utc_time())
     }
 }
 

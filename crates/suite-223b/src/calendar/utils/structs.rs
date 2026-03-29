@@ -1,4 +1,4 @@
-use std::time::Duration;
+use std::{str::FromStr, time::Duration};
 
 use chrono::{
     DateTime, Local, NaiveDate, NaiveDateTime, NaiveTime, TimeZone, Utc, offset::LocalResult,
@@ -135,13 +135,50 @@ fn windows_to_iana(tzid: &str) -> String {
     }
 }
 
+#[derive(Deserialize, Serialize, Debug, Clone, Copy, PartialEq)]
+#[serde(rename_all = "snake_case")]
+pub enum Partstat {
+    #[serde(alias = "ACCEPTED", alias = "accepted")]
+    Accepted,
+    
+    #[serde(alias = "DECLINED", alias = "declined")]
+    Declined,
+    
+    #[serde(alias = "TENTATIVE", alias = "tentative")]
+    Tentative,
+    
+    #[serde(alias = "DELEGATED", alias = "delegated")]
+    Delegated,
+
+    // Google uses 'needsAction', CalDAV uses 'NEEDS-ACTION'
+    #[serde(alias = "needsAction", alias = "NEEDS-ACTION", alias = "needs-action")]
+    NeedsAction,
+
+    #[serde(other)]
+    Unknown,
+}
+
+impl FromStr for Partstat {
+    type Err = ();
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        match s.to_uppercase().as_str() {
+            "ACCEPTED" => Ok(Self::Accepted),
+            "DECLINED" => Ok(Self::Declined),
+            "TENTATIVE" => Ok(Self::Tentative),
+            "DELEGATED" => Ok(Self::Delegated),
+            "NEEDS-ACTION" | "NEEDSACTION" => Ok(Self::NeedsAction),
+            _ => Ok(Self::Unknown),
+        }
+    }
+}
+
 #[derive(Default, Debug, Clone, PartialEq, Deserialize, Serialize)]
 pub struct Attendee {
     pub email: Option<String>,
     #[serde(rename = "cn")]
     pub display_name: Option<String>,
     pub role: Option<String>,
-    pub partstat: Option<String>,
+    pub partstat: Option<Partstat>,
 }
 impl Attendee {
     pub fn is_valid(&self) -> bool {
@@ -158,10 +195,11 @@ impl TryFrom<ical::property::Property> for Attendee {
 
         if let Some(params) = value.params {
             for (k, v) in params {
+                let val = v.into_iter().next();
                 match k.as_str() {
-                    "CN" => cn = v.into_iter().next(),
-                    "ROLE" => role = v.into_iter().next(),
-                    "PARTSTAT" => partstat = v.into_iter().next(),
+                    "CN" => cn = val,
+                    "ROLE" => role = val,
+                    "PARTSTAT" => partstat = val.and_then(|s| s.parse().ok()),
                     _ => {}
                 }
             }

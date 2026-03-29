@@ -16,7 +16,7 @@ use crate::{
         protocol::CalendarProvider,
         utils::{
             CalDavEvent, CalEventType, CalendarInfo, Meeting, MeetingProvider,
-            structs::{Attendee, DateTimeSpec, RecurrenceRule},
+            structs::{Attendee, DateTimeSpec, Partstat, RecurrenceRule},
         },
     },
     utils::errors::{WatsonError, WatsonErrorKind},
@@ -162,7 +162,7 @@ pub struct GoogleEventUser {
     pub display_name: Option<String>,
     pub organizer: Option<bool>,
     #[serde(rename = "responseStatus")]
-    pub partstat: Option<String>,
+    pub partstat: Option<Partstat>,
 }
 impl From<GoogleEventUser> for Attendee {
     fn from(v: GoogleEventUser) -> Self {
