@@ -1,5 +1,6 @@
 use std::{
     cell::Cell,
+    collections::HashMap,
     sync::{Arc, OnceLock},
 };
 
@@ -15,7 +16,7 @@ use crate::{
         google::auth::GoogleAuth,
         protocol::CalendarProvider,
         utils::{
-            CalDavEvent, CalEventType, CalendarInfo, Meeting, MeetingProvider,
+            CalDavEvent, CalEventType, CalendarInfo, Meeting,
             structs::{Attendee, DateTimeSpec, Partstat, RecurrenceRule},
         },
     },
@@ -93,7 +94,8 @@ pub struct GoogleCalendarEvent {
     pub attendees: Option<Vec<GoogleEventUser>>,
 }
 impl GoogleCalendarEvent {
-    fn to_cal_dav_event(self, calendar_info: Arc<CalendarInfo>) -> CalDavEvent {
+    fn to_cal_dav_event(mut self, calendar_info: Arc<CalendarInfo>) -> CalDavEvent {
+        let meeting = self.get_meeting();
         let start = self.start.map(|v| v.into());
         let end = self.end.map(|v| v.into());
         let event_type = match (start.as_ref(), end.as_ref()) {
@@ -106,7 +108,7 @@ impl GoogleCalendarEvent {
         CalDavEvent {
             uid: self.id,
             title: self.title.unwrap_or("Untitled Event".into()),
-            meeting: self.description.as_deref().and_then(extract_meeting),
+            meeting,
             description: self.description,
             location: self.location,
             start,
@@ -130,6 +132,20 @@ impl GoogleCalendarEvent {
             event_type,
             seen: Cell::new(false),
         }
+    }
+    fn get_meeting(&mut self) -> Option<Meeting> {
+        // parse location
+        if let Some(meeting) = self.location.as_deref().and_then(parse_meeting) {
+            self.location = Some(meeting.to_string());
+            return Some(meeting)
+        }
+
+        // parse description
+        if let Some(meeting) = self.description.as_deref().and_then(parse_meeting) {
+            return Some(meeting)
+        }
+
+        None
     }
 }
 
@@ -300,6 +316,7 @@ impl CalendarProvider for GoogleCalendarClient {
             }
 
             let calendar_rc = Arc::new(calendar);
+            println!("{:?}", text);
             let tmp_events: Vec<CalDavEvent> =
                 serde_json::from_str::<GoogleCalendarEventList>(&text)
                     .map_err(|e| watson_err!(WatsonErrorKind::Deserialize, e.to_string()))?
@@ -315,7 +332,32 @@ impl CalendarProvider for GoogleCalendarClient {
     }
 }
 
-pub fn extract_meeting(text: &str) -> Option<Meeting> {
+pub fn parse_meeting(text: &str) -> Option<Meeting> {
+    if let Some(teams_meeting) = extract_teams_meeting(text) {
+        return Some(teams_meeting);
+    }
+
+    if let Some(zoom_meeting) = extract_zoom_meeting(text) {
+        return Some(zoom_meeting)
+    }
+
+    None
+}
+
+pub fn extract_zoom_meeting(text: &str) -> Option<Meeting> {
+    static ZOOM_REGEX: OnceLock<Regex> = OnceLock::new();
+    let re = ZOOM_REGEX.get_or_init(|| {
+        Regex::new(r"(?i)https://(?:[a-zA-Z0-9-]+\.)?zoom\.us/(?:j|my|s)/\d{9,11}(?:\?pwd=[a-zA-Z0-9]+)?")
+            .expect("Invalid Teams Regex")
+    });
+
+    let m = re.find(text.as_bytes())?;
+    let url = text[m.start()..m.end()].to_string();
+
+    Some(Meeting::Zoom { url })
+}
+
+pub fn extract_teams_meeting(text: &str) -> Option<Meeting> {
     static TEAMS_REGEX: OnceLock<Regex> = OnceLock::new();
     let re = TEAMS_REGEX.get_or_init(|| {
         Regex::new(r#"https://teams\.(microsoft|live)\.com/meet/[^\s"<>]+"#)
@@ -325,8 +367,5 @@ pub fn extract_meeting(text: &str) -> Option<Meeting> {
     let m = re.find(text.as_bytes())?;
     let url = text[m.start()..m.end()].to_string();
 
-    Some(Meeting {
-        provider: MeetingProvider::MicrosoftTeams,
-        url,
-    })
+    Some(Meeting::MicrosoftTeams { url })
 }

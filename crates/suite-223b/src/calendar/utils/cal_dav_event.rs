@@ -20,15 +20,18 @@ pub struct CalendarInfo {
     pub color: Option<String>,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
-pub enum MeetingProvider {
-    MicrosoftTeams,
-}
-
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-pub struct Meeting {
-    pub provider: MeetingProvider,
-    pub url: String,
+pub enum Meeting {
+    MicrosoftTeams { url: String },
+    Zoom { url: String },
+}
+impl ToString for Meeting {
+    fn to_string(&self) -> String {
+        match self {
+            Self::Zoom { .. } => String::from("Zoom Meeting"),
+            Self::MicrosoftTeams { .. } => String::from("Microsoft Teams Meeting"),
+        }
+    }
 }
 
 #[derive(Default, Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -68,6 +71,7 @@ impl TryFrom<IcalEvent> for CalDavEvent {
     type Error = WatsonError;
     fn try_from(value: IcalEvent) -> Result<Self, Self::Error> {
         let mut out = Self::default();
+        println!("{:?}", value.properties);
 
         for prop in value.properties {
             match prop.name.as_str() {
@@ -117,14 +121,11 @@ impl TryFrom<IcalEvent> for CalDavEvent {
 
                 "X-MICROSOFT-SKYPETEAMSMEETINGURL" => {
                     if let Some(url) = prop.value {
-                        out.meeting = Some(Meeting {
-                            provider: MeetingProvider::MicrosoftTeams,
-                            url,
-                        })
+                        out.meeting = Some(Meeting::MicrosoftTeams { url })
                     }
                 }
 
-                _ => {}
+                _ => { }
             }
         }
 
