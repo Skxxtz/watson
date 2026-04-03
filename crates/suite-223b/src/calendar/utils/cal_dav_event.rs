@@ -33,6 +33,14 @@ impl ToString for Meeting {
         }
     }
 }
+impl Meeting {
+    pub fn url(&self) -> Option<&str> {
+        match self {
+            Self::MicrosoftTeams { url } => Some(url),
+            Self::Zoom { url } => Some(url)
+        }
+    }
+}
 
 #[derive(Default, Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct CalDavEvent {
