@@ -1,13 +1,16 @@
-use std::{cell::Cell, sync::Arc};
+use std::{borrow::Cow, cell::Cell, sync::Arc};
 
 use chrono::{DateTime, Datelike, Days, Local, NaiveDate, Utc, Weekday};
 use ical::parser::ical::component::IcalEvent;
 use serde::{Deserialize, Serialize};
 
 use crate::{
-    calendar::utils::{
-        funcs::{last_day_of_month, parse_exdate, parse_rdate, parse_until, parse_utc},
-        structs::{Attendee, DateTimeSpec, RecurrenceRule},
+    calendar::{
+        protocol,
+        utils::{
+            funcs::{last_day_of_month, parse_exdate, parse_rdate, parse_until, parse_utc},
+            structs::{Attendee, DateTimeSpec, RecurrenceRule},
+        },
     },
     utils::errors::{WatsonError, WatsonErrorKind},
     watson_err,
@@ -34,11 +37,49 @@ impl ToString for Meeting {
     }
 }
 impl Meeting {
-    pub fn url(&self) -> Option<&str> {
+    pub fn url(&self) -> &str {
         match self {
-            Self::MicrosoftTeams { url } => Some(url),
-            Self::Zoom { url } => Some(url)
+            Self::MicrosoftTeams { url } => url,
+            Self::Zoom { url } => url,
         }
+    }
+    pub fn protocol_prefix(&self) -> &'static str {
+        match self {
+            Self::MicrosoftTeams { .. } => "msteams",
+            Self::Zoom { .. } => "zoommtg",
+        }
+    }
+    pub fn mime_url(&self) -> Cow<'_, str> {
+        let url = self.url();
+        let protocol = self.protocol_prefix();
+
+        if url.starts_with(protocol) {
+            return Cow::Borrowed(url);
+        }
+
+        if let Some(rest) = url.strip_prefix("https") {
+            return Cow::Owned(format!("{protocol}{rest}"));
+        }
+
+        if let Some(rest) = url.strip_prefix("http") {
+            return Cow::Owned(format!("{protocol}{rest}"));
+        }
+
+        return Cow::Borrowed(url);
+    }
+    pub fn https_url(&self) -> Cow<'_, str> {
+        let url = self.url();
+
+        if url.starts_with("http") {
+            return Cow::Borrowed(url);
+        }
+
+        let protocol = self.protocol_prefix();
+        if let Some(base) = url.strip_prefix(protocol) {
+            return Cow::Owned(format!("https{base}"));
+        }
+
+        Cow::Owned(format!("https://{url}"))
     }
 }
 
@@ -133,7 +174,7 @@ impl TryFrom<IcalEvent> for CalDavEvent {
                     }
                 }
 
-                _ => { }
+                _ => {}
             }
         }
 
